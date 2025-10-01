@@ -16,29 +16,10 @@
     .dim { opacity:.5; pointer-events:none; }
   </style>
 
-  <!-- (필수) 네가 이미 올려둔 vender/kuroshiro.min.js만 사용 -->
-  <script src="./vendor/kuroshiro.min.js?v=8"></script>
-
-  <!-- (내장) TinySegmenter 분석기: 별도 파일 불필요, 전역에 KuroshiroAnalyzerTinySegmenter 등록 -->
-  <script>
-  /*! 아주 간단한 TinySegmenter 래퍼 (UMD 전역명: KuroshiroAnalyzerTinySegmenter) */
-  (function (g) {
-    function TinySeg(){
-      this.segment=function(s){return s?String(s).split(/(\s+)/).filter(Boolean):[]};
-    }
-    function Analyzer(){
-      this._seg=new TinySeg();
-    }
-    Analyzer.prototype.init=function(){return Promise.resolve();};
-    Analyzer.prototype.parse=function(text){
-      var arr=this._seg.segment(text||"");
-      return arr.map(function(tok){
-        return {surface_form: tok, pos:"", basic_form: tok, reading:"", pronunciation:""};
-      });
-    };
-    g.KuroshiroAnalyzerTinySegmenter = Analyzer;
-  })(window);
-  </script>
+  <!-- Kuroshiro (네가 쓰는 경로 유지; 캐시무력화 숫자는 수시로 바꿔도 OK) -->
+  <script src="./vendor/kuroshiro.min.js?v=20"></script>
+  <!-- TinySegmenter 분석기(로컬) -->
+  <script src="./vendor/kuroshiro-analyzer-tinyseg.min.js?v=20"></script>
 </head>
 <body>
   <h2>Japanese → Korean (Furigana + DeepL)</h2>
@@ -55,10 +36,10 @@
   </div>
 
   <script>
-    /* 1) 네 실제 Cloudflare Worker /translate 주소로 교체 */
-    const PROXY_URL = "https://solitary-mud-8caf.rlaalsrbr.workers.dev/translate"; // ← 요기만 수정
+    // 1) 본인 워커 주소
+    const PROXY_URL = "https://solitary-mud-8caf.rlaalsrbr.workers.dev/translate"; // ← 여기만 바꾸면 됨
 
-    /* 2) 요소 */
+    // 2) 요소
     const inputEl = document.getElementById('inputText');
     const btn = document.getElementById('runBtn');
     const box = document.getElementById('resultBox');
@@ -67,37 +48,57 @@
     const errEl = document.getElementById('errorText');
     const dbgEl  = document.getElementById('debugText');
 
-    function showDebug(){
+    // ===== 디버그 표시 =====
+    function showDebug(foundPath="(미탐색)") {
+      const ks = typeof window.Kuroshiro;
+      const an = typeof window.KuroshiroAnalyzerTinySegmenter;
       dbgEl.textContent =
-        "typeof Kuroshiro = " + (typeof window.Kuroshiro) + "\n" +
-        "typeof KuroshiroAnalyzerTinySegmenter = " + (typeof window.KuroshiroAnalyzerTinySegmenter);
+        "typeof Kuroshiro = " + ks + "\n" +
+        "typeof KuroshiroAnalyzerTinySegmenter = " + an + "\n" +
+        "ctorPath = " + foundPath;
     }
 
-    /* 3) Kuroshiro 초기화 */
-    let kuroshiroReady = false;
-    let kuro;
-    async function initKuroshiro(){
-      showDebug();
-      if (kuroshiroReady) return;
-      if (typeof Kuroshiro !== "function"){
-        throw new Error("Kuroshiro 로드 실패: vendor/kuroshiro.min.js 파일이 JS가 아닐 수 있음(HTML로 저장 등).");
-      }
-      if (typeof KuroshiroAnalyzerTinySegmenter !== "function"){
-        throw new Error("분석기 로드 실패(내장 분석기 전역 심볼 미탑재) — 이 파일을 그대로 다시 업로드해 주세요.");
-      }
-      kuro = new Kuroshiro();
-      await kuro.init(new KuroshiroAnalyzerTinySegmenter());
-      kuroshiroReady = true;
+    // ===== Kuroshiro 생성자 자동탐색 =====
+    function getKuroConstructor() {
+      const k = window.Kuroshiro;
+      // 1) 정상 UMD: 함수
+      if (typeof k === "function") { showDebug("Kuroshiro"); return k; }
+      // 2) CommonJS 번들이 전역 객체로 노출된 경우
+      if (k && typeof k.default === "function") { showDebug("Kuroshiro.default"); return k.default; }
+      if (k && typeof k.Kuroshiro === "function") { showDebug("Kuroshiro.Kuroshiro"); return k.Kuroshiro; }
+      // 3) 혹시 window.default 아래로 붙는 케이스
+      if (window.default && typeof window.default.Kuroshiro === "function") { showDebug("window.default.Kuroshiro"); return window.default.Kuroshiro; }
+      if (window.default && typeof window.default === "function") { showDebug("window.default"); return window.default; }
+
+      showDebug("NOT FOUND");
+      return null;
     }
 
-    async function makeFuriganaHTML(text){
-      if (!kuroshiroReady) await initKuroshiro();
-      /* TinySegmenter는 정확도가 낮지만, furigana 모드는 Kuroshiro가 토큰을 <ruby>로 감싸서 렌더 */
+    // ===== 초기화 =====
+    let kuroReady = false;
+    let kuro = null;
+
+    async function initKuroshiro() {
+      if (kuroReady) return;
+      const KuroCtor = getKuroConstructor();
+      if (!KuroCtor) throw new Error("Kuroshiro 생성자를 찾을 수 없습니다. (vendor/kuroshiro.min.js 교체 권장)");
+
+      if (typeof window.KuroshiroAnalyzerTinySegmenter !== "function") {
+        throw new Error("TinySegmenter 분석기가 로드되지 않았습니다. (vendor/kuroshiro-analyzer-tinyseg.min.js 확인)");
+      }
+
+      kuro = new KuroCtor();
+      await kuro.init(new window.KuroshiroAnalyzerTinySegmenter());
+      kuroReady = true;
+    }
+
+    // ===== Furigana / 번역 =====
+    async function makeFuriganaHTML(text) {
+      if (!kuroReady) await initKuroshiro();
       return await kuro.convert(text, { mode: "furigana", to: "hiragana" });
     }
 
-    /* 4) 번역 */
-    async function translate(text){
+    async function translate(text) {
       const res = await fetch(PROXY_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -105,40 +106,36 @@
       });
       const raw = await res.text();
       if (!res.ok) throw new Error("Worker 오류: " + res.status + " " + raw);
-      let data={}; try{ data = JSON.parse(raw);}catch(_){}
+      let data = {}; try { data = JSON.parse(raw); } catch(_) {}
       return data.translation || "";
     }
 
-    /* 5) 실행 */
-    async function runAll(){
+    async function runAll() {
       const text = (inputEl.value || "").trim();
-      box.style.display = "block"; showDebug();
-      rubyEl.innerHTML=""; transEl.textContent=""; errEl.textContent="";
+      box.style.display = "block";
+      rubyEl.innerHTML = ""; transEl.textContent = ""; errEl.textContent = "";
 
-      if (!text){ errEl.textContent="문장을 입력(또는 단축어로 전달)하세요."; return; }
+      if (!text) { errEl.textContent = "문장을 입력(또는 단축어로 전달)하세요."; return; }
 
-      btn.disabled=true; btn.classList.add('dim');
-      try{
+      btn.disabled = true; btn.classList.add('dim');
+      try {
         const [furiganaHtml, ko] = await Promise.all([ makeFuriganaHTML(text), translate(text) ]);
         rubyEl.innerHTML = furiganaHtml;
         transEl.textContent = "→ " + ko;
-      }catch(e){
+      } catch (e) {
         errEl.textContent = e?.message || String(e);
-      }finally{
-        btn.disabled=false; btn.classList.remove('dim');
+      } finally {
+        btn.disabled = false; btn.classList.remove('dim');
       }
     }
 
     btn.addEventListener('click', runAll);
 
-    /* 6) 단축어 ?q= 자동실행 */
-    window.addEventListener('load', ()=>{
+    // 단축어 ?q= 자동실행
+    window.addEventListener('load', () => {
       box.style.display = "block"; showDebug();
       const q = new URLSearchParams(location.search).get('q');
-      if (q){
-        inputEl.value = decodeURIComponent(q);
-        setTimeout(runAll, 300);
-      }
+      if (q) { inputEl.value = decodeURIComponent(q); setTimeout(runAll, 300); }
     });
   </script>
 </body>
