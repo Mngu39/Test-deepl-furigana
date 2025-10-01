@@ -12,14 +12,10 @@
     .ruby-area { font-size:22px; line-height:1.6; }
     .translation { margin-top:10px; color:#222; font-size:18px; white-space:pre-wrap; }
     .error { color:#b00020; font-size:14px; margin-top:6px; white-space:pre-wrap; }
-    .hint { font-size:13px; color:#666; margin-top:8px; }
-    .dim { opacity:.6; pointer-events:none; }
   </style>
-
-  <!-- kuromoji 제거, TinySegmenter 도입 -->
+  <!-- Kuroshiro + TinySegmenter -->
   <script src="https://cdn.jsdelivr.net/npm/kuroshiro@1.2.0/dist/kuroshiro.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/kuroshiro-analyzer-tinyseg@1.0.2/dist/kuroshiro-analyzer-tinyseg.min.js"></script>
-
 </head>
 <body>
   <h2>Japanese → Korean (Furigana + DeepL)</h2>
@@ -27,125 +23,8 @@
   <label for="inputText">번역/요미가나 처리할 일본어 문장</label>
   <textarea id="inputText" placeholder="例：勉強する"></textarea>
   <button id="runBtn">변환 & 번역</button>
-  <div class="hint">※ 단축어로 열었다면 주소에 <code>?q=문장</code>이 붙습니다. 수동 입력도 가능.</div>
 
   <div class="result" id="resultBox" style="display:none">
     <div class="ruby-area" id="rubyHtml"></div>
     <div class="translation" id="translationText"></div>
-    <div class="error" id="errorText"></div>
-  </div>
-
-  <script>
-    // 본인 워커 주소 (반드시 /translate 포함)
-    const PROXY_URL = "https://solitary-mud-8caf.rlaalsrbr.workers.dev/translate";
-
-    // DOM
-    const inputEl = document.getElementById('inputText');
-    const btn = document.getElementById('runBtn');
-    const box = document.getElementById('resultBox');
-    const rubyEl = document.getElementById('rubyHtml');
-    const transEl = document.getElementById('translationText');
-    const errEl = document.getElementById('errorText');
-
-    // 전역 심볼 로드 대기
-    function waitForGlobal(name, timeoutMs=4000) {
-      const start = Date.now();
-      return new Promise((resolve, reject) => {
-        (function check(){
-          if (window[name]) return resolve(window[name]);
-          if (Date.now() - start > timeoutMs) return reject(new Error(name + " 로드 실패"));
-          requestAnimationFrame(check);
-        })();
-      });
-    }
-
-    // 기존 initKuroshiro() 전부 교체
-    let kuroshiroReady = false;
-    let kuroshiro;
-    async function initKuroshiro() {
-      if (kuroshiroReady) return;
-      // TinySegmenterAnalyzer 글로벌 로드 대기
-      await waitForGlobal("TinySegmenterAnalyzer", 12000); // 타임아웃 12초로 여유
-      kuroshiro = new Kuroshiro();
-    await kuroshiro.init(new TinySegmenterAnalyzer()); // 사전 불필요
-      kuroshiroReady = true;
-    }
-
-    // 후리가나 생성
-    async function makeFuriganaHTML(text) {
-      if (!kuroshiroReady) await initKuroshiro();
-      return await kuroshiro.convert(text, { mode: "furigana", to: "hiragana" });
-    }
-
-    // DeepL 프록시 호출
-    async function translate(text) {
-      if (!PROXY_URL || !/\/translate\b/.test(PROXY_URL)) {
-        throw new Error("PROXY_URL이 비었거나 /translate 경로가 없습니다.");
-      }
-      const res = await fetch(PROXY_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text, target: "KO" })
-      });
-      const raw = await res.text();
-      if (!res.ok) throw new Error("Worker/DeepL 오류: " + res.status + " " + raw);
-      let data = {};
-      try { data = JSON.parse(raw); } catch(_) {}
-      if (!data.translation) throw new Error("번역 응답에 translation 필드가 없습니다: " + raw);
-      return data.translation;
-    }
-
-    // 실행
-    async function runAll() {
-      const text = (inputEl.value || "").trim();
-      box.style.display = "block";
-      rubyEl.innerHTML = ""; transEl.textContent = ""; errEl.textContent = "";
-
-      if (!text) { errEl.textContent = "문장을 입력(또는 단축어로 전달)하세요."; return; }
-
-      btn.classList.add("dim"); btn.disabled = true;
-      try {
-        const [furiganaHtml, ko] = await Promise.all([
-          makeFuriganaHTML(text),
-          translate(text)
-        ]);
-        rubyEl.innerHTML = furiganaHtml;
-        transEl.textContent = "→ " + ko;
-      } catch (e) {
-        errEl.textContent = (e && e.message) ? e.message : String(e);
-        console.error(e);
-      } finally {
-        btn.classList.remove("dim"); btn.disabled = false;
-      }
-    }
-
-    btn.addEventListener('click', runAll);
-
-    // 쿼리 파라미터 자동 실행 (?q=...)
-    function getQueryParam(name) {
-      const v = new URLSearchParams(location.search).get(name);
-      return v ? decodeURIComponent(v) : "";
-    }
-    async function autoRunFromQuery() {
-      const q = getQueryParam('q');
-      if (!q) return;
-      inputEl.value = q;
-      requestAnimationFrame(runAll);
-    }
-
-    // 부트스트랩
-    (async function bootstrap(){
-      try {
-        await waitForGlobal("kuromoji");
-        await waitForGlobal("Kuroshiro");
-      } catch (e) {
-        box.style.display = "block";
-        errEl.textContent = "라이브러리 로드 실패: " + (e?.message || e);
-        return;
-      }
-      autoRunFromQuery();
-    })();
-  </script>
-</body>
-</html>
-
+    <div class=
