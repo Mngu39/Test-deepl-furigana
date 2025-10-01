@@ -101,6 +101,17 @@
         runBtn.disabled = false;
         runBtn.textContent = "변환 & 번역";
       }
+      
+        // URL ?q=... 로 들어오면 자동 실행
+      function autoRunFromQuery() {
+        const q = new URLSearchParams(location.search).get('q');
+        if (!q) return;
+        const input = document.getElementById('inputText'); // 당신 페이지의 입력칸 id에 맞춰주세요
+        input.value = decodeURIComponent(q);
+        document.getElementById('runBtn').click(); // “변환 & 번역” 버튼 id에 맞춰주세요
+      }
+
+  document.addEventListener
     });
   </script>
 </body>
