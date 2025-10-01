@@ -16,9 +16,10 @@
     .dim { opacity:.6; pointer-events:none; }
   </style>
 
-  <!-- 라이브러리: jsDelivr (순서: kuromoji → kuroshiro) -->
-  <script src="https://cdn.jsdelivr.net/npm/kuromoji@0.1.2/dist/kuromoji.js"></script>
+  <!-- kuromoji 제거, TinySegmenter 도입 -->
   <script src="https://cdn.jsdelivr.net/npm/kuroshiro@1.2.0/dist/kuroshiro.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/kuroshiro-analyzer-tinyseg@1.0.2/dist/kuroshiro-analyzer-tinyseg.min.js"></script>
+
 </head>
 <body>
   <h2>Japanese → Korean (Furigana + DeepL)</h2>
@@ -58,28 +59,16 @@
       });
     }
 
-    // Kuroshiro 초기화
+    // 기존 initKuroshiro() 전부 교체
     let kuroshiroReady = false;
     let kuroshiro;
     async function initKuroshiro() {
       if (kuroshiroReady) return;
-      await waitForGlobal("kuromoji");
-      await new Promise((resolve, reject) => {
-        try {
-          kuromoji.builder({
-            dicPath: "https://cdn.jsdelivr.net/npm/kuromoji@0.1.2/dict/"
-          }).build((err, tokenizer) => {
-            if (err) return reject(err);
-            try {
-              kuroshiro = new Kuroshiro();
-              kuroshiro.init(tokenizer).then(() => {
-                kuroshiroReady = true;
-                resolve();
-              }).catch(reject);
-            } catch (e) { reject(e); }
-          });
-        } catch (e) { reject(e); }
-      });
+      // TinySegmenterAnalyzer 글로벌 로드 대기
+      await waitForGlobal("TinySegmenterAnalyzer", 12000); // 타임아웃 12초로 여유
+      kuroshiro = new Kuroshiro();
+    await kuroshiro.init(new TinySegmenterAnalyzer()); // 사전 불필요
+      kuroshiroReady = true;
     }
 
     // 후리가나 생성
@@ -159,3 +148,4 @@
   </script>
 </body>
 </html>
+
