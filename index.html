@@ -16,9 +16,9 @@
     .dim { opacity:.6; pointer-events:none; }
   </style>
 
-  <!-- 1) 라이브러리: 순서 보장 (kuromoji → kuroshiro), defer/async 없이 -->
-  <script src="https://unpkg.com/kuromoji@0.1.2/dist/kuromoji.js"></script>
-  <script src="https://unpkg.com/kuroshiro@1.2.0/dist/kuroshiro.min.js"></script>
+  <!-- 라이브러리: jsDelivr (순서: kuromoji → kuroshiro) -->
+  <script src="https://cdn.jsdelivr.net/npm/kuromoji@0.1.2/dist/kuromoji.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/kuroshiro@1.2.0/dist/kuroshiro.min.js"></script>
 </head>
 <body>
   <h2>Japanese → Korean (Furigana + DeepL)</h2>
@@ -35,10 +35,10 @@
   </div>
 
   <script>
-    // 2) 워커 주소 (반드시 /translate 포함)
+    // 본인 워커 주소 (반드시 /translate 포함)
     const PROXY_URL = "https://solitary-mud-8caf.rlaalsrbr.workers.dev/translate";
 
-    // 3) DOM 요소
+    // DOM
     const inputEl = document.getElementById('inputText');
     const btn = document.getElementById('runBtn');
     const box = document.getElementById('resultBox');
@@ -46,9 +46,7 @@
     const transEl = document.getElementById('translationText');
     const errEl = document.getElementById('errorText');
 
-    // 4) Kuroshiro 준비 (2중 안전장치 + 타임아웃)
-    let kuroshiroReady = false;
-    let kuroshiro;
+    // 전역 심볼 로드 대기
     function waitForGlobal(name, timeoutMs=4000) {
       const start = Date.now();
       return new Promise((resolve, reject) => {
@@ -60,34 +58,37 @@
       });
     }
 
+    // Kuroshiro 초기화
+    let kuroshiroReady = false;
+    let kuroshiro;
     async function initKuroshiro() {
       if (kuroshiroReady) return;
-      // kuromoji가 정말 로드됐는지 확인
       await waitForGlobal("kuromoji");
       await new Promise((resolve, reject) => {
         try {
-          kuromoji.builder({ dicPath: "https://unpkg.com/kuromoji@0.1.2/dict/" })
-            .build((err, tokenizer) => {
-              if (err) return reject(err);
-              try {
-                kuroshiro = new Kuroshiro();
-                kuroshiro.init(tokenizer).then(() => {
-                  kuroshiroReady = true;
-                  resolve();
-                }).catch(reject);
-              } catch (e) { reject(e); }
-            });
+          kuromoji.builder({
+            dicPath: "https://cdn.jsdelivr.net/npm/kuromoji@0.1.2/dict/"
+          }).build((err, tokenizer) => {
+            if (err) return reject(err);
+            try {
+              kuroshiro = new Kuroshiro();
+              kuroshiro.init(tokenizer).then(() => {
+                kuroshiroReady = true;
+                resolve();
+              }).catch(reject);
+            } catch (e) { reject(e); }
+          });
         } catch (e) { reject(e); }
       });
     }
 
-    // 5) 후리가나 만들기
+    // 후리가나 생성
     async function makeFuriganaHTML(text) {
       if (!kuroshiroReady) await initKuroshiro();
       return await kuroshiro.convert(text, { mode: "furigana", to: "hiragana" });
     }
 
-    // 6) 번역 요청 (에러 메시지 친절히)
+    // DeepL 프록시 호출
     async function translate(text) {
       if (!PROXY_URL || !/\/translate\b/.test(PROXY_URL)) {
         throw new Error("PROXY_URL이 비었거나 /translate 경로가 없습니다.");
@@ -105,7 +106,7 @@
       return data.translation;
     }
 
-    // 7) 실행
+    // 실행
     async function runAll() {
       const text = (inputEl.value || "").trim();
       box.style.display = "block";
@@ -113,10 +114,7 @@
 
       if (!text) { errEl.textContent = "문장을 입력(또는 단축어로 전달)하세요."; return; }
 
-      // 버튼 중복 클릭 방지
-      btn.classList.add("dim");
-      btn.disabled = true;
-
+      btn.classList.add("dim"); btn.disabled = true;
       try {
         const [furiganaHtml, ko] = await Promise.all([
           makeFuriganaHTML(text),
@@ -128,39 +126,34 @@
         errEl.textContent = (e && e.message) ? e.message : String(e);
         console.error(e);
       } finally {
-        btn.classList.remove("dim");
-        btn.disabled = false;
+        btn.classList.remove("dim"); btn.disabled = false;
       }
     }
 
     btn.addEventListener('click', runAll);
 
-    // 8) 단축어 쿼리 자동 실행 (?q=...)
+    // 쿼리 파라미터 자동 실행 (?q=...)
     function getQueryParam(name) {
       const v = new URLSearchParams(location.search).get(name);
       return v ? decodeURIComponent(v) : "";
     }
-
     async function autoRunFromQuery() {
       const q = getQueryParam('q');
       if (!q) return;
       inputEl.value = q;
-      // kuromoji 사전 로드 시간 고려 → 첫 프레임 뒤 실행
       requestAnimationFrame(runAll);
     }
 
-    // 9) 초기화: 라이브러리 로드 확인 → 자동실행 시도
+    // 부트스트랩
     (async function bootstrap(){
       try {
         await waitForGlobal("kuromoji");
         await waitForGlobal("Kuroshiro");
       } catch (e) {
-        // 라이브러리 로딩 실패시 바로 표시
         box.style.display = "block";
         errEl.textContent = "라이브러리 로드 실패: " + (e?.message || e);
         return;
       }
-      // 쿼리 자동 실행
       autoRunFromQuery();
     })();
   </script>
