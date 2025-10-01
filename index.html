@@ -27,4 +27,78 @@
   <div class="result" id="resultBox" style="display:none">
     <div class="ruby-area" id="rubyHtml"></div>
     <div class="translation" id="translationText"></div>
-    <div class=
+    <div class="error" id="errorText"></div>
+  </div>
+
+  <script>
+    // Worker 주소
+    const PROXY_URL = "https://solitary-mud-8caf.rlaalsrbr.workers.dev/translate";
+
+    const inputEl = document.getElementById('inputText');
+    const btn = document.getElementById('runBtn');
+    const box = document.getElementById('resultBox');
+    const rubyEl = document.getElementById('rubyHtml');
+    const transEl = document.getElementById('translationText');
+    const errEl = document.getElementById('errorText');
+
+    // Kuroshiro 준비
+    let kuroshiroReady = false;
+    let kuroshiro;
+    async function initKuroshiro() {
+      if (kuroshiroReady) return;
+      kuroshiro = new Kuroshiro();
+      await kuroshiro.init(new TinySegmenterAnalyzer());
+      kuroshiroReady = true;
+    }
+
+    // 후리가나 생성
+    async function makeFuriganaHTML(text) {
+      if (!kuroshiroReady) await initKuroshiro();
+      return await kuroshiro.convert(text, { mode: "furigana", to: "hiragana" });
+    }
+
+    // 번역 호출
+    async function translate(text) {
+      const res = await fetch(PROXY_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text, target: "KO" })
+      });
+      if (!res.ok) throw new Error("Worker 오류: " + res.status);
+      const data = await res.json();
+      return data.translation || "";
+    }
+
+    // 실행
+    async function runAll() {
+      const text = (inputEl.value || "").trim();
+      box.style.display = "block";
+      rubyEl.innerHTML = ""; transEl.textContent = ""; errEl.textContent = "";
+      if (!text) { errEl.textContent = "문장을 입력하거나 단축어로 전달하세요."; return; }
+
+      try {
+        const [furiganaHtml, ko] = await Promise.all([
+          makeFuriganaHTML(text),
+          translate(text)
+        ]);
+        rubyEl.innerHTML = furiganaHtml;
+        transEl.textContent = "→ " + ko;
+      } catch (e) {
+        errEl.textContent = String(e?.message || e);
+        console.error(e);
+      }
+    }
+
+    btn.addEventListener('click', runAll);
+
+    // 단축어 쿼리 자동실행 (?q=...)
+    window.addEventListener('load', () => {
+      const q = new URLSearchParams(location.search).get('q');
+      if (q) {
+        inputEl.value = decodeURIComponent(q);
+        setTimeout(runAll, 300);
+      }
+    });
+  </script>
+</body>
+</html>
