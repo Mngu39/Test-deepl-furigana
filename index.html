@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
   <meta charset="utf-8" />
-  <title>Furigana + DeepL (토큰 팝업)</title>
+  <title>Furigana + DeepL (Kana-only view)</title>
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <style>
     :root { --bg:#0b0f14; --card:#11161f; --ink:#e6edf3; --line:#223044; --muted:#9fb0c2; --accent:#5aa9ff; }
@@ -21,14 +21,10 @@
     .right{margin-left:auto}
     .kbd{font:12px/1 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:#cbd6e2;background:#121820;border:1px solid var(--line);border-radius:6px;padding:2px 6px}
 
-    /* 클릭 영역 */
+    /* 클릭 가능한 토큰 (표시는 카나만) */
     .tok{padding:1px 2px;border-radius:6px;cursor:pointer}
     .tok:hover{background:#1a2436}
     .tok[data-clickable="0"]{cursor:default}
-
-    /* ruby 클릭 안정화: ruby/rb/rt가 터치 이벤트를 가로채지 않도록 */
-    .tok ruby, .tok rb, .tok rt { pointer-events: none; }
-    ruby rt{font-size:.75em;color:#b9c8d8}
 
     .error{color:#ffb3b3}
 
@@ -50,6 +46,7 @@
     <div class="label">입력 텍스트</div>
     <textarea id="input" placeholder="여기에 일본어 텍스트를 붙여넣고 버튼을 누르세요。"></textarea>
     <div class="row" style="margin-top:10px">
+      <button class="btn" id="pasteBtn">클립보드에서 붙여넣기</button>
       <button class="btn" id="btnFuri">후리가나</button>
       <button class="btn" id="btnTrans">번역</button>
       <button class="btn primary" id="btnBoth">둘 다</button>
@@ -57,9 +54,9 @@
     </div>
   </section>
 
-  <!-- 결과: 후리가나(클릭 가능) -->
+  <!-- 결과: 카나 전용 뷰(토큰 클릭 팝업) -->
   <section class="card">
-    <div class="label">후리가나 (토큰을 클릭하면 팝업)</div>
+    <div class="label">읽기(카나 전용) — 토큰을 클릭하면 팝업</div>
     <div id="rubyOut" class="out" aria-live="polite"></div>
   </section>
 
@@ -75,7 +72,7 @@
 
 <!-- 토큰 팝업 -->
 <div id="pop" class="pop hidden" role="dialog" aria-live="polite">
-  <h4 id="popTitle"></h4>
+  <h4 id="popSurface"></h4>
   <div class="kv"><b>Lemma</b>: <span id="popLemma"></span></div>
   <div class="kv"><b>Ruby</b>: <span id="popRuby"></span></div>
   <div class="kv"><b>DeepL</b>: <span id="popDeepl"></span></div>
@@ -94,13 +91,7 @@ const DEEPL_URL    = "https://solitary-mud-8caf.rlaalsrbr.workers.dev/translate"
 const $ = s => document.querySelector(s);
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 function escapeHtml(s){ const d=document.createElement("div"); d.innerText=s; return d.innerHTML; }
-/* 속성 값 안전하게(큰따옴표 포함) */
-function escapeAttr(s){
-  return String(s)
-    .replace(/&/g,"&amp;")
-    .replace(/"/g,"&quot;")
-    .replace(/</g,"&lt;");
-}
+function escapeAttr(s){ return String(s).replace(/&/g,"&amp;").replace(/"/g,"&quot;").replace(/</g,"&lt;"); }
 function setHtml(el, html){ el.innerHTML = html; }
 function setText(el, text){ el.textContent = text; }
 function withTimeout(run, ms=45000, label="요청"){
@@ -113,6 +104,7 @@ function withTimeout(run, ms=45000, label="요청"){
 }
 function kata2hira(s){ return s.replace(/[\u30a1-\u30f6]/g, ch => String.fromCharCode(ch.charCodeAt(0)-0x60)); }
 function hasKanji(s){ return /[\u4E00-\u9FFF]/.test(s); }
+function isKanaOnly(s){ return /^[\u3040-\u309F\u30A0-\u30FF]+$/.test(s); } // 히라+가타카나만
 
 /* ===== API ===== */
 async function callFurigana(text){
@@ -132,44 +124,41 @@ async function callDeepL(text, src="JA", tgt="KO"){
   return withTimeout(fetcher, 45000, "DeepL");
 }
 
-/* ===== 토큰 → 클릭 가능한 루비 DOM ===== */
-function buildClickableRuby(tokens){
-  const frags = tokens.map((t, idx) => {
+/* ===== 토큰 → 카나 전용 클릭 가능한 DOM =====
+   - 한자 포함 토큰: 화면에는 '읽기(히라가나)'만 표시
+   - 카나만 토큰: 화면에는 표면 그대로 표시(루비/읽기표시 없음)
+*/
+function buildKanaOnly(tokens){
+  return tokens.map((t, idx)=>{
     const s = String(t.surface || "");
     const r = String(t.reading || "");
     const lemma = String(t.lemma || s);
     const rt = r ? kata2hira(r) : "";
 
-    // 화면 표시용 (단어 단위 루비)
-    const inner = (hasKanji(s) && rt)
-      ? `<ruby><rb>${escapeHtml(s)}</rb><rt>${escapeHtml(rt)}</rt></ruby>`
-      : escapeHtml(s);
-
+    const display = hasKanji(s) && rt ? rt : s;  // ← 핵심: 한자어는 읽기만 보여줌
     const clickable = s.trim() ? "1" : "0";
+
     return `<span class="tok" data-i="${idx}" data-clickable="${clickable}"
-             data-surface="${escapeAttr(s)}"
-             data-lemma="${escapeAttr(lemma)}"
-             data-reading="${escapeAttr(rt)}">${inner}</span>`;
-  });
-  return frags.join("");
+              data-surface="${escapeAttr(s)}"
+              data-lemma="${escapeAttr(lemma)}"
+              data-reading="${escapeAttr(rt)}">${escapeHtml(display)}</span>`;
+  }).join("");
 }
 
 /* ===== 팝업 ===== */
 const pop = $("#pop");
-const popTitle = $("#popTitle");
-const popLemma = $("#popLemma");
-const popRuby  = $("#popRuby");
-const popDeepl = $("#popDeepl");
-const popCopy  = $("#popCopy");
-const popClose = $("#popClose");
+const popSurface = $("#popSurface");
+const popLemma   = $("#popLemma");
+const popRuby    = $("#popRuby");
+const popDeepl   = $("#popDeepl");
+const popCopy    = $("#popCopy");
+const popClose   = $("#popClose");
 let deeplCache = new Map();
 
 function openPop(x, y, payload){
-  popTitle.textContent = payload.surface || "";
-  popLemma.textContent = payload.lemma || "";
-  popRuby.innerHTML    = (payload.reading && hasKanji(payload.surface))
-    ? `<ruby><rb>${escapeHtml(payload.surface)}</rb><rt>${escapeHtml(payload.reading)}</rt></ruby>`
-    : escapeHtml(payload.surface || "");
+  popSurface.textContent = payload.surface || "";
+  popLemma.textContent   = payload.lemma || "";
+  popRuby.textContent    = payload.reading || "";
 
   popDeepl.textContent = "번역 중…";
   const key = payload.lemma || payload.surface || "";
@@ -185,15 +174,15 @@ function openPop(x, y, payload){
     });
   }
 
-  const pad = 8, vw = window.innerWidth, vh = window.innerHeight;
-  pop.style.left = Math.min(x + pad, vw - 340) + "px";
-  pop.style.top  = Math.min(y + pad, vh - 200) + "px";
+  const pad=8, vw=window.innerWidth, vh=window.innerHeight;
+  pop.style.left = Math.min(x+pad, vw-340)+"px";
+  pop.style.top  = Math.min(y+pad, vh-200)+"px";
   pop.classList.remove("hidden");
 }
 function closePop(){ pop.classList.add("hidden"); }
 popClose.addEventListener("click", closePop);
 popCopy.addEventListener("click", ()=>{
-  const text = `Lemma: ${popLemma.textContent}\nRuby: ${popRuby.textContent}\nDeepL: ${popDeepl.textContent}`;
+  const text = `Surface: ${popSurface.textContent}\nLemma: ${popLemma.textContent}\nRuby: ${popRuby.textContent}\nDeepL: ${popDeepl.textContent}`;
   navigator.clipboard.writeText(text).then(()=>alert("팝업 내용을 복사했습니다."));
 });
 window.addEventListener("keydown", e=>{ if(e.key==="Escape") closePop(); });
@@ -210,13 +199,11 @@ async function doFuri(){
   setHtml($("#rubyOut"), "<em style='color:#9fb0c2'>생성 중…</em>");
   try{
     const res = await callFurigana(text);
-    const html = buildClickableRuby(res.tokens || []);
-    setHtml($("#rubyOut"), html || "<em style='color:#9fb0c2'>결과 없음</em>");
+    setHtml($("#rubyOut"), buildKanaOnly(res.tokens || []));
   }catch(e){
     setHtml($("#rubyOut"), `<span class="error">에러(후리가나): ${escapeHtml(e.message||String(e))}</span>`);
   }
 }
-
 async function doTrans(){
   const text = $("#input").value.trim();
   if(!text){ alert("입력 텍스트가 비었습니다."); return; }
@@ -229,29 +216,22 @@ async function doTrans(){
     setHtml($("#transOut"), `<span class="error">에러(번역): ${escapeHtml(e.message||String(e))}</span>`);
   }
 }
-
 async function doBoth(){ await Promise.all([doFuri(), doTrans()]); }
 
-/* ===== 토큰 클릭 핸들러 (견고한 위임) ===== */
+/* ===== 토큰 클릭 ===== */
 $("#rubyOut").addEventListener("click", (e)=>{
-  // ruby/rb/rt가 이벤트를 가로채지 못하도록 CSS 설정했지만,
-  // 방어적으로 가장 가까운 .tok를 다시 탐색
   let el = e.target instanceof Element ? e.target : null;
-  while(el && !el.classList.contains("tok")){
-    el = el.parentElement;
-  }
-  if(!el) return;
-  if(el.dataset.clickable === "0") return;
+  while(el && !el.classList.contains("tok")) el = el.parentElement;
+  if(!el || el.dataset.clickable === "0") return;
 
-  const payload = {
+  openPop(e.clientX, e.clientY, {
     surface: el.dataset.surface || "",
     lemma:   el.dataset.lemma   || "",
     reading: el.dataset.reading || ""
-  };
-  openPop(e.clientX, e.clientY, payload);
+  });
 });
 
-/* ===== 버튼/단축키 ===== */
+/* ===== 단축키/버튼 ===== */
 $("#btnFuri").addEventListener("click", doFuri);
 $("#btnTrans").addEventListener("click", doTrans);
 $("#btnBoth").addEventListener("click", doBoth);
@@ -261,10 +241,20 @@ $("#copyTrans").addEventListener("click", ()=>{
   navigator.clipboard.writeText(txt).then(()=>alert("번역 텍스트를 복사했습니다."));
 });
 window.addEventListener("keydown", (e)=>{
-  if((e.ctrlKey||e.metaKey) && e.key === "Enter"){ e.preventDefault(); doBoth(); }
+  if((e.ctrlKey||e.metaKey) && e.key==="Enter"){ e.preventDefault(); doBoth(); }
 });
 
-/* ===== 단축어 연동: ?text=...&auto=1 ===== */
+/* ===== 클립보드에서 붙여넣기(모바일 권한 이슈 대비: 사용자가 버튼을 눌러야 읽힘) ===== */
+$("#pasteBtn").addEventListener("click", async ()=>{
+  try{
+    const t = await navigator.clipboard.readText();
+    if(t){ $("#input").value = t; }
+  }catch(e){ alert("클립보드 읽기 권한이 필요합니다. Safari 설정을 확인하세요."); }
+});
+
+/* ===== 단축어 연동: ?text=...&auto=1 =====
+   - Shortcuts에서 URL 열기: https://<GH_PAGES_URL>/index.html?text=<URL-Encoded Clipboard>&auto=1
+*/
 (function initFromQuery(){
   const sp = new URLSearchParams(location.search);
   const qText = sp.get("text");
