@@ -21,7 +21,7 @@
     textarea{width:100%;min-height:120px;background:#0e141c;color:var(--ink);border:1px solid var(--line);border-radius:10px;padding:12px;resize:vertical;line-height:1.5;font-family:inherit}
     ruby rt{font-size:.75em;color:#b9c8d8}
 
-    /* details/summary: 모바일 터치+데스크톱 클릭 모두 OK */
+    /* details/summary: 모바일+데스크톱 OK */
     details summary{list-style:none; cursor:pointer; display:flex; align-items:center; gap:8px; user-select:none}
     details summary::-webkit-details-marker{display:none}
     .chev{transition:transform .2s ease}
@@ -87,74 +87,89 @@ const FURIGANA_URL = "https://furigana-api-345684237835.asia-northeast3.run.app/
 const DEEPL_URL    = "https://solitary-mud-8caf.rlaalsrbr.workers.dev/translate";
 
 /* ===== 유틸 ===== */
-const $ = s => document.querySelector(s);
-const sleep = ms => new Promise(r => setTimeout(r, ms));
-function escapeHtml(s){ const d=document.createElement("div"); d.innerText=s; return d.innerHTML; }
-function escapeAttr(s){ return String(s).replace(/&/g,"&amp;").replace(/"/g,"&quot;").replace(/</g,"&lt;"); }
-function withTimeout(run, ms=45000, label="요청"){
-  const ctrl = new AbortController(); const t = setTimeout(()=>ctrl.abort(), ms);
-  return Promise.race([ run(ctrl.signal), (async()=>{ await sleep(ms+50); throw new Error(`${label} 타임아웃(${ms}ms)`); })() ])
-    .finally(()=>clearTimeout(t));
+const $ = function(s){ return document.querySelector(s); };
+const sleep = function(ms){ return new Promise(function(r){ return setTimeout(r, ms); }); };
+function escapeHtml(s){ var d=document.createElement("div"); d.innerText=s; return d.innerHTML; }
+function escapeAttr(s){
+  return String(s).replace(/&/g,"&amp;").replace(/"/g,"&quot;").replace(/</g,"&lt;");
 }
-function kata2hira(s){ return s.replace(/[\u30a1-\u30f6]/g, ch => String.fromCharCode(ch.charCodeAt(0)-0x60)); }
+function withTimeout(run, ms, label){
+  if(ms==null) ms=45000;
+  if(!label) label="요청";
+  var ctrl = new AbortController();
+  var t = setTimeout(function(){ ctrl.abort(); }, ms);
+  return Promise.race([
+    run(ctrl.signal),
+    (async function(){ await sleep(ms+50); throw new Error(label + " 타임아웃(" + ms + "ms)"); })()
+  ]).finally(function(){ clearTimeout(t); });
+}
+function kata2hira(s){
+  return s.replace(/[\u30a1-\u30f6]/g, function(ch){ return String.fromCharCode(ch.charCodeAt(0)-0x60); });
+}
 function hasKanji(s){ return /[\u4E00-\u9FFF]/.test(s); }
 function isKanaOnly(s){ return /^[\u3040-\u309F\u30A0-\u30FF]+$/.test(s); }
 
 /* ===== API ===== */
 async function callFurigana(text){
-  const body = { text, perChar: false };
-  const fetcher = (signal)=>fetch(FURIGANA_URL, {
-    method:"POST", headers:{ "Content-Type":"application/json" },
-    body: JSON.stringify(body), signal
-  }).then(r => { if(!r.ok) throw new Error(`Furigana API ${r.status}`); return r.json(); });
+  var body = { text: text, perChar: false };
+  var fetcher = function(signal){
+    return fetch(FURIGANA_URL, {
+      method:"POST", headers:{ "Content-Type":"application/json" },
+      body: JSON.stringify(body), signal: signal
+    }).then(function(r){ if(!r.ok) throw new Error("Furigana API " + r.status); return r.json(); });
+  };
   return withTimeout(fetcher, 45000, "Furigana");
 }
-async function callDeepL(text, src="JA", tgt="KO"){
-  const body = { text, sourceLang: src, targetLang: tgt };
-  const fetcher = (signal)=>fetch(DEEPL_URL, {
-    method:"POST", headers:{ "Content-Type":"application/json" },
-    body: JSON.stringify(body), signal
-  }).then(r => { if(!r.ok) throw new Error(`DeepL ${r.status}`); return r.json(); });
+async function callDeepL(text, src, tgt){
+  if(!src) src="JA";
+  if(!tgt) tgt="KO";
+  var body = { text: text, sourceLang: src, targetLang: tgt };
+  var fetcher = function(signal){
+    return fetch(DEEPL_URL, {
+      method:"POST", headers:{ "Content-Type":"application/json" },
+      body: JSON.stringify(body), signal: signal
+    }).then(function(r){ if(!r.ok) throw new Error("DeepL " + r.status); return r.json(); });
+  };
   return withTimeout(fetcher, 45000, "DeepL");
 }
 
 /* ===== details 열릴 때 포커스 */
-$("#inputBox").addEventListener("toggle", ()=>{
+$("#inputBox").addEventListener("toggle", function(){
   if($("#inputBox").open){ $("#input").focus(); }
 });
 
 /* ===== 원문(후리가나) DOM 생성 (클릭 가능) ===== */
 function buildClickableRuby(tokens){
-  return tokens.map((t, idx)=>{
-    const s = String(t.surface || "");
-    const r = String(t.reading || "");
-    const lemma = String(t.lemma || s);
-    const rt = r ? kata2hira(r) : "";
+  return (tokens||[]).map(function(t, idx){
+    var s = String(t.surface || "");
+    var r = String(t.reading || "");
+    var lemma = String(t.lemma || s);
+    var rt = r ? kata2hira(r) : "";
 
-    const inner = (hasKanji(s) && rt)
-      ? `<ruby><rb>${escapeHtml(s)}</rb><rt>${escapeHtml(rt)}</rt></ruby>`
+    var inner = (hasKanji(s) && rt)
+      ? '<ruby><rb>' + escapeHtml(s) + '</rb><rt>' + escapeHtml(rt) + '</rt></ruby>'
       : escapeHtml(s);
 
-    const clickable = s.trim() ? "1" : "0";
-    return `<span class="tok" data-i="${idx}" data-clickable="${clickable}"
-              data-surface="${escapeAttr(s)}"
-              data-lemma="${escapeAttr(lemma)}"
-              data-reading="${escapeAttr(rt)}">${inner}</span>`;
+    var clickable = s.trim() ? "1" : "0";
+    return '<span class="tok" data-i="' + idx + '" data-clickable="' + clickable + '"' +
+           ' data-surface="' + escapeAttr(s) + '"' +
+           ' data-lemma="' + escapeAttr(lemma) + '"' +
+           ' data-reading="' + escapeAttr(rt) + '">' + inner + '</span>';
   }).join("");
 }
 
 /* ===== 팝업 ===== */
-const pop = $("#pop");
-const popSurface = $("#popSurface");
-const popLemma   = $("#popLemma");
-const popRuby    = $("#popRuby");
-const kvRuby     = $("#kvRuby");
-const popDeepl   = $("#popDeepl");
+var pop = $("#pop");
+var popSurface = $("#popSurface");
+var popLemma   = $("#popLemma");
+var popRuby    = $("#popRuby");
+var kvRuby     = $("#kvRuby");
+var popDeepl   = $("#popDeepl");
 
 function openPop(x, y, payload){
-  const surface = payload.surface || "";
-  const lemma   = payload.lemma   || surface;
-  const reading = payload.reading || "";
+  var surface = payload.surface || "";
+  var lemma   = payload.lemma   || surface;
+  var reading = payload.reading || "";
 
   popSurface.textContent = surface;
   popLemma.textContent   = lemma;
@@ -169,22 +184,22 @@ function openPop(x, y, payload){
   }
 
   popDeepl.textContent = "불러오는 중…";
-  const key = lemma || surface;
-  callDeepL(key, "JA", "KO").then(res=>{
-    const t = res.translation ?? res.result ?? res.data ?? "";
+  var key = lemma || surface;
+  callDeepL(key, "JA", "KO").then(function(res){
+    var t = res.translation || res.result || res.data || "";
     popDeepl.textContent = t || "(결과 없음)";
-  }).catch(e=>{
-    popDeepl.textContent = `에러: ${e.message||String(e)}`;  /* ← 버그 fix */
+  }).catch(function(e){
+    popDeepl.textContent = "에러: " + ((e && e.message) ? e.message : String(e));
   });
 
-  const pad=8, vw=window.innerWidth, vh=window.innerHeight;
-  pop.style.left = Math.min(x+pad, vw-340)+"px";
-  pop.style.top  = Math.min(y+pad, vh-220)+"px";
+  var pad=8, vw=window.innerWidth, vh=window.innerHeight;
+  pop.style.left = Math.min(x+pad, vw-340) + "px";
+  pop.style.top  = Math.min(y+pad, vh-220) + "px";
   pop.style.display = "block";
 }
 function closePop(){ pop.style.display = "none"; }
 $("#popClose").addEventListener("click", closePop);
-document.addEventListener("click", e=>{
+document.addEventListener("click", function(e){
   if(pop.style.display==="block"){
     if(!pop.contains(e.target) && !e.target.closest(".tok")) closePop();
   }
@@ -192,9 +207,9 @@ document.addEventListener("click", e=>{
 
 /* ===== 실행 ===== */
 async function runBoth(){
-  const text = $("#input").value.trim();
+  var text = $("#input").value.trim();
   if(!text){
-    const box = $("#inputBox");
+    var box = $("#inputBox");
     if(!box.open) box.open = true;
     $("#input").focus();
     return;
@@ -202,19 +217,20 @@ async function runBoth(){
   $("#rubyOut").innerHTML  = "<em style='color:#9fb0c2'>생성 중…</em>";
   $("#transOut").innerHTML = "<em style='color:#9fb0c2'>번역 중…</em>";
   try{
-    const [furi, tr] = await Promise.all([callFurigana(text), callDeepL(text, "JA", "KO")]);
+    var both = await Promise.all([callFurigana(text), callDeepL(text, "JA", "KO")]);
+    var furi = both[0], tr = both[1];
     $("#rubyOut").innerHTML = buildClickableRuby(furi.tokens || []);
-    const t = tr.translation ?? tr.result ?? tr.data ?? "";
+    var t = tr.translation || tr.result || tr.data || "";
     $("#transOut").innerHTML = t ? escapeHtml(t).replace(/\n/g,"<br>") : "<em style='color:#9fb0c2'>결과 없음</em>";
   }catch(e){
-    $("#rubyOut").innerHTML = `<span class="error">에러(후리가나): ${escapeHtml(e.message||String(e))}</span>`;
+    $("#rubyOut").innerHTML = "<span class=\"error\">에러(후리가나): " + escapeHtml((e && e.message) ? e.message : String(e)) + "</span>";
     $("#transOut").innerHTML = "";
   }
 }
 
 /* 원문 박스 클릭 → 팝업 */
-$("#rubyOut").addEventListener("click", (e)=>{
-  let el = e.target instanceof Element ? e.target : null;
+$("#rubyOut").addEventListener("click", function(e){
+  var el = (e.target instanceof Element) ? e.target : null;
   while(el && !el.classList.contains("tok")) el = el.parentElement;
   if(!el || el.dataset.clickable === "0") return;
   openPop(e.clientX, e.clientY, {
@@ -226,21 +242,21 @@ $("#rubyOut").addEventListener("click", (e)=>{
 
 /* 버튼/단축키 */
 $("#runBtn").addEventListener("click", runBoth);
-window.addEventListener("keydown", (e)=>{
+window.addEventListener("keydown", function(e){
   if((e.ctrlKey||e.metaKey) && e.key==="Enter"){ e.preventDefault(); runBoth(); }
 });
 
 /* ===== 단축어 연동: ?text=...&auto=1 (이중 인코딩 복원 포함) ===== */
 function getQueryText(){
-  const sp = new URLSearchParams(location.search);
-  let q = sp.get("text");
-  if (!q) return "";
-  try { q = decodeURIComponent(q); } catch {}
-  try { q = decodeURIComponent(q); } catch {}
+  var sp = new URLSearchParams(location.search);
+  var q = sp.get("text");
+  if(!q) return "";
+  try { q = decodeURIComponent(q); } catch(e){}
+  try { q = decodeURIComponent(q); } catch(e){}
   return q;
 }
 (function initFromQuery(){
-  const qText = getQueryText();
+  var qText = getQueryText();
   if(qText){
     $("#input").value = qText;
     if (new URLSearchParams(location.search).get("auto")==="1") { runBoth(); }
