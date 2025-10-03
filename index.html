@@ -6,13 +6,12 @@
   <title>JP → KO: Furigana + DeepL</title>
   <style>
     body { font-family: -apple-system, BlinkMacSystemFont, "Noto Sans KR", Arial; padding:16px; max-width:820px; margin:0 auto; }
-    .top { margin-bottom:12px; }
     label { display:block; margin-bottom:6px; }
     textarea { width:100%; height:120px; font-size:18px; padding:8px; }
     button { padding:10px 14px; font-size:16px; margin-top:8px; }
     .block { margin-top:16px; }
 
-    /* 후리가나(루비) 표시 강화 */
+    /* 후리가나 표시 */
     .ruby-area {
       font-size:22px;
       line-height:1.8;
@@ -20,12 +19,11 @@
       white-space: normal;
     }
     ruby rt {
-      font-size: 14px;         /* 루비(읽기) 크기 */
-      color: #555;             /* 루비 색상 */
-      display: inline;         /* 루비가 보이도록 */
+      font-size: 14px;
+      color: #555;
+      display: inline;
     }
 
-    /* 번역 결과 박스 */
     .result {
       margin-top:12px;
       padding:12px;
@@ -33,43 +31,38 @@
       background:#f8f8f8;
       color:#222;
       font-size:18px;
-      white-space:pre-wrap;    /* 줄바꿈 유지 */
+      white-space:pre-wrap;
       word-wrap: break-word;
     }
 
-    .error { color:#b00020; font-size:14px; margin-top:8px; white-space:pre-wrap; }
+    .error { color:#b00020; font-size:14px; margin-top:8px; }
     .dim { opacity:.5; pointer-events:none; }
   </style>
 
-  <!-- 로컬(깃허브)에서 제공: 캐시 무력화 쿼리는 필요 시 숫자만 변경 -->
-  <script src="./vendor/kuroshiro.min.js?v=30"></script>
-  <script src="./vendor/kuroshiro-analyzer-tinyseg.min.js?v=30"></script>
+  <!-- 브라우저용 UMD 번들만 사용 -->
+  <script src="https://cdn.jsdelivr.net/npm/kuroshiro@1.2.0/dist/kuroshiro.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/kuroshiro-analyzer-tinyseg@1.0.2/dist/kuroshiro-analyzer-tinyseg.min.js"></script>
 </head>
 <body>
   <h2>Japanese → Korean (Furigana + DeepL)</h2>
 
-  <!-- 1) 입력창(편집만 담당) -->
-  <div class="top">
-    <label for="inputText">번역/요미가나 처리할 일본어 문장</label>
-    <textarea id="inputText" placeholder="例：日本語を勉強する"></textarea>
-    <button id="runBtn">변환 & 번역</button>
-    <div id="err" class="error"></div>
-  </div>
+  <label for="inputText">번역/요미가나 처리할 일본어 문장</label>
+  <textarea id="inputText" placeholder="例：日本語を勉強する"></textarea>
+  <button id="runBtn">변환 & 번역</button>
+  <div id="err" class="error"></div>
 
-  <!-- 2) 입력창 바로 위/아래에 ‘원문+후리가나’만 표시 -->
   <div class="block">
     <strong>후리가나</strong>
     <div id="rubyHtml" class="ruby-area"></div>
   </div>
 
-  <!-- 3) 번역 결과는 별도의 회색 박스에만 표시 -->
   <div class="block">
     <strong>번역</strong>
     <div id="translationText" class="result"></div>
   </div>
 
   <script>
-    // ⬇️ 여기를 네 Cloudflare Worker /translate 주소로 교체
+    // 본인 Cloudflare Worker 주소
     const PROXY_URL = "https://solitary-mud-8caf.rlaalsrbr.workers.dev/translate";
 
     const inputEl = document.getElementById('inputText');
@@ -78,39 +71,21 @@
     const transEl = document.getElementById('translationText');
     const errEl   = document.getElementById('err');
 
-    // Kuroshiro 생성자 자동 탐색 (UMD/Object 어떤 형태든 대응)
-    function getKuroConstructor() {
-      const k = window.Kuroshiro;
-      if (typeof k === "function") return k;                            // 정상 UMD
-      if (k && typeof k.default === "function") return k.default;      // CommonJS 번들
-      if (k && typeof k.Kuroshiro === "function") return k.Kuroshiro;  // 내부 네임스페이스
-      if (window.default && typeof window.default.Kuroshiro === "function") return window.default.Kuroshiro;
-      if (typeof window.default === "function") return window.default;
-      return null;
-    }
-
-    // 초기화
+    let kuro;
     let kuroReady = false;
-    let kuro = null;
+
     async function initKuroshiro() {
       if (kuroReady) return;
-      const KuroCtor = getKuroConstructor();
-      if (!KuroCtor) throw new Error("Kuroshiro 생성자를 찾을 수 없습니다. (vendor/kuroshiro.min.js 교체 필요)");
-      if (typeof window.KuroshiroAnalyzerTinySegmenter !== "function") {
-        throw new Error("TinySegmenter 분석기가 로드되지 않았습니다. (vendor/kuroshiro-analyzer-tinyseg.min.js 확인)");
-      }
-      kuro = new KuroCtor();
-      await kuro.init(new window.KuroshiroAnalyzerTinySegmenter());
+      kuro = new Kuroshiro();
+      await kuro.init(new Kuroshiro.Analyzer.TinySegmenter());
       kuroReady = true;
     }
 
-    // Furigana 변환 (히라가나)
     async function makeFuriganaHTML(text) {
       if (!kuroReady) await initKuroshiro();
       return await kuro.convert(text, { mode: "furigana", to: "hiragana" });
     }
 
-    // 번역 (DeepL Worker)
     async function translate(text) {
       const res = await fetch(PROXY_URL, {
         method: "POST",
@@ -119,16 +94,14 @@
       });
       const raw = await res.text();
       if (!res.ok) throw new Error("Worker 오류: " + res.status + " " + raw);
-      let data = {}; try { data = JSON.parse(raw); } catch(_) {}
+      const data = JSON.parse(raw);
       return data.translation || "";
     }
 
-    // 실행: 입력창 = 편집만 / 후리가나 = rubyEl / 번역 = transEl
     async function runAll() {
-      const text = (inputEl.value || "").trim();
+      const text = inputEl.value.trim();
       errEl.textContent = ""; rubyEl.innerHTML = ""; transEl.textContent = "";
-
-      if (!text) { errEl.textContent = "문장을 입력(또는 단축어로 전달)하세요."; return; }
+      if (!text) { errEl.textContent = "문장을 입력하세요."; return; }
 
       btn.disabled = true; btn.classList.add('dim');
       try {
@@ -136,12 +109,10 @@
           makeFuriganaHTML(text),
           translate(text)
         ]);
-        // ① 후리가나만 표시 (원문+루비)
         rubyEl.innerHTML = furiganaHtml;
-        // ② 번역만 표시
         transEl.textContent = ko;
       } catch (e) {
-        errEl.textContent = e?.message || String(e);
+        errEl.textContent = e.message;
       } finally {
         btn.disabled = false; btn.classList.remove('dim');
       }
@@ -149,7 +120,7 @@
 
     btn.addEventListener('click', runAll);
 
-    // 단축어 ?q= 자동 실행
+    // 단축어 자동 실행 (?q=...)
     window.addEventListener('load', () => {
       const q = new URLSearchParams(location.search).get('q');
       if (q) {
