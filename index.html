@@ -20,10 +20,16 @@
     .label{font-size:13px;color:var(--muted);margin-bottom:8px}
     .right{margin-left:auto}
     .kbd{font:12px/1 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:#cbd6e2;background:#121820;border:1px solid var(--line);border-radius:6px;padding:2px 6px}
-    ruby rt{font-size:.75em;color:#b9c8d8}
+
+    /* 클릭 영역 */
     .tok{padding:1px 2px;border-radius:6px;cursor:pointer}
     .tok:hover{background:#1a2436}
     .tok[data-clickable="0"]{cursor:default}
+
+    /* ruby 클릭 안정화: ruby/rb/rt가 터치 이벤트를 가로채지 않도록 */
+    .tok ruby, .tok rb, .tok rt { pointer-events: none; }
+    ruby rt{font-size:.75em;color:#b9c8d8}
+
     .error{color:#ffb3b3}
 
     /* 팝업 */
@@ -72,7 +78,6 @@
   <h4 id="popTitle"></h4>
   <div class="kv"><b>Lemma</b>: <span id="popLemma"></span></div>
   <div class="kv"><b>Ruby</b>: <span id="popRuby"></span></div>
-  <div class="kv"><b>POS</b>: <span id="popPOS"></span></div>
   <div class="kv"><b>DeepL</b>: <span id="popDeepl"></span></div>
   <div class="act">
     <button class="btn" id="popCopy">복사</button>
@@ -89,6 +94,13 @@ const DEEPL_URL    = "https://solitary-mud-8caf.rlaalsrbr.workers.dev/translate"
 const $ = s => document.querySelector(s);
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 function escapeHtml(s){ const d=document.createElement("div"); d.innerText=s; return d.innerHTML; }
+/* 속성 값 안전하게(큰따옴표 포함) */
+function escapeAttr(s){
+  return String(s)
+    .replace(/&/g,"&amp;")
+    .replace(/"/g,"&quot;")
+    .replace(/</g,"&lt;");
+}
 function setHtml(el, html){ el.innerHTML = html; }
 function setText(el, text){ el.textContent = text; }
 function withTimeout(run, ms=45000, label="요청"){
@@ -104,7 +116,7 @@ function hasKanji(s){ return /[\u4E00-\u9FFF]/.test(s); }
 
 /* ===== API ===== */
 async function callFurigana(text){
-  const body = { text, perChar: false }; // 글자 단위 루비는 사용 안함
+  const body = { text, perChar: false };
   const fetcher = (signal)=>fetch(FURIGANA_URL, {
     method:"POST", headers:{ "Content-Type":"application/json" },
     body: JSON.stringify(body), signal
@@ -120,37 +132,33 @@ async function callDeepL(text, src="JA", tgt="KO"){
   return withTimeout(fetcher, 45000, "DeepL");
 }
 
-/* ===== 토큰 기반 루비 DOM 재구성 (클릭 가능) ===== */
+/* ===== 토큰 → 클릭 가능한 루비 DOM ===== */
 function buildClickableRuby(tokens){
   const frags = tokens.map((t, idx) => {
     const s = String(t.surface || "");
     const r = String(t.reading || "");
     const lemma = String(t.lemma || s);
     const rt = r ? kata2hira(r) : "";
-    const posTop = Array.isArray(t.pos_detail) && t.pos_detail.length ? t.pos_detail.join("・") : (t.pos || "");
 
-    // 표시용 HTML(단어 단위 루비)
+    // 화면 표시용 (단어 단위 루비)
     const inner = (hasKanji(s) && rt)
       ? `<ruby><rb>${escapeHtml(s)}</rb><rt>${escapeHtml(rt)}</rt></ruby>`
       : escapeHtml(s);
 
-    // 구두점/공백도 span으로 감싸되 data-clickable=0 처리
     const clickable = s.trim() ? "1" : "0";
     return `<span class="tok" data-i="${idx}" data-clickable="${clickable}"
-             data-surface="${escapeHtml(s)}"
-             data-lemma="${escapeHtml(lemma)}"
-             data-reading="${escapeHtml(rt)}"
-             data-pos="${escapeHtml(posTop)}">${inner}</span>`;
+             data-surface="${escapeAttr(s)}"
+             data-lemma="${escapeAttr(lemma)}"
+             data-reading="${escapeAttr(rt)}">${inner}</span>`;
   });
   return frags.join("");
 }
 
-/* ===== 팝업 컨트롤 ===== */
+/* ===== 팝업 ===== */
 const pop = $("#pop");
 const popTitle = $("#popTitle");
 const popLemma = $("#popLemma");
 const popRuby  = $("#popRuby");
-const popPOS   = $("#popPOS");
 const popDeepl = $("#popDeepl");
 const popCopy  = $("#popCopy");
 const popClose = $("#popClose");
@@ -159,10 +167,9 @@ let deeplCache = new Map();
 function openPop(x, y, payload){
   popTitle.textContent = payload.surface || "";
   popLemma.textContent = payload.lemma || "";
-  popRuby.innerHTML    = payload.reading && hasKanji(payload.surface)
+  popRuby.innerHTML    = (payload.reading && hasKanji(payload.surface))
     ? `<ruby><rb>${escapeHtml(payload.surface)}</rb><rt>${escapeHtml(payload.reading)}</rt></ruby>`
     : escapeHtml(payload.surface || "");
-  popPOS.textContent   = payload.pos || "";
 
   popDeepl.textContent = "번역 중…";
   const key = payload.lemma || payload.surface || "";
@@ -178,27 +185,21 @@ function openPop(x, y, payload){
     });
   }
 
-  // 위치/표시
-  const pad = 8;
-  const vw = window.innerWidth, vh = window.innerHeight;
+  const pad = 8, vw = window.innerWidth, vh = window.innerHeight;
   pop.style.left = Math.min(x + pad, vw - 340) + "px";
   pop.style.top  = Math.min(y + pad, vh - 200) + "px";
   pop.classList.remove("hidden");
 }
-
-function closePop(){
-  pop.classList.add("hidden");
-}
-
+function closePop(){ pop.classList.add("hidden"); }
 popClose.addEventListener("click", closePop);
 popCopy.addEventListener("click", ()=>{
-  const text = `Lemma: ${popLemma.textContent}\nPOS: ${popPOS.textContent}\nRuby: ${popRuby.textContent}\nDeepL: ${popDeepl.textContent}`;
+  const text = `Lemma: ${popLemma.textContent}\nRuby: ${popRuby.textContent}\nDeepL: ${popDeepl.textContent}`;
   navigator.clipboard.writeText(text).then(()=>alert("팝업 내용을 복사했습니다."));
 });
 window.addEventListener("keydown", e=>{ if(e.key==="Escape") closePop(); });
 document.addEventListener("click", e=>{
   if(!pop.classList.contains("hidden")){
-    if(!pop.contains(e.target) && !e.target.classList.contains("tok")) closePop();
+    if(!pop.contains(e.target) && !e.target.closest(".tok")) closePop();
   }
 });
 
@@ -209,7 +210,6 @@ async function doFuri(){
   setHtml($("#rubyOut"), "<em style='color:#9fb0c2'>생성 중…</em>");
   try{
     const res = await callFurigana(text);
-    // 클릭 가능한 루비 DOM으로 재구성
     const html = buildClickableRuby(res.tokens || []);
     setHtml($("#rubyOut"), html || "<em style='color:#9fb0c2'>결과 없음</em>");
   }catch(e){
@@ -232,15 +232,21 @@ async function doTrans(){
 
 async function doBoth(){ await Promise.all([doFuri(), doTrans()]); }
 
-/* ===== 토큰 클릭 핸들러 ===== */
+/* ===== 토큰 클릭 핸들러 (견고한 위임) ===== */
 $("#rubyOut").addEventListener("click", (e)=>{
-  const el = e.target.closest(".tok");
-  if(!el || el.dataset.clickable === "0") return;
+  // ruby/rb/rt가 이벤트를 가로채지 못하도록 CSS 설정했지만,
+  // 방어적으로 가장 가까운 .tok를 다시 탐색
+  let el = e.target instanceof Element ? e.target : null;
+  while(el && !el.classList.contains("tok")){
+    el = el.parentElement;
+  }
+  if(!el) return;
+  if(el.dataset.clickable === "0") return;
+
   const payload = {
     surface: el.dataset.surface || "",
     lemma:   el.dataset.lemma   || "",
-    reading: el.dataset.reading || "",
-    pos:     el.dataset.pos     || ""
+    reading: el.dataset.reading || ""
   };
   openPop(e.clientX, e.clientY, payload);
 });
