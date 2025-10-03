@@ -21,7 +21,7 @@
     textarea{width:100%;min-height:120px;background:#0e141c;color:var(--ink);border:1px solid var(--line);border-radius:10px;padding:12px;resize:vertical;line-height:1.5;font-family:inherit}
     ruby rt{font-size:.75em;color:#b9c8d8}
 
-    /* 접히는 입력 영역: details/summary 사용 (모바일 터치+데스크톱 클릭 모두 OK) */
+    /* details/summary: 모바일 터치+데스크톱 클릭 모두 OK */
     details summary{list-style:none; cursor:pointer; display:flex; align-items:center; gap:8px; user-select:none}
     details summary::-webkit-details-marker{display:none}
     .chev{transition:transform .2s ease}
@@ -39,7 +39,7 @@
 <header><h1>Furigana + 번역</h1></header>
 <main>
 
-  <!-- 입력(요청: 제목을 클릭하면 펼쳐져서 입력 가능, 버튼도 이 안에 숨김) -->
+  <!-- 입력(제목 클릭 → 펼침). 버튼도 이 안에 숨김 -->
   <section class="card">
     <details id="inputBox">
       <summary>
@@ -50,7 +50,7 @@
       <div style="margin-top:10px">
         <textarea id="input" placeholder="일본어 텍스트를 붙여넣고 ‘후리가나 & 번역’ 버튼을 누르세요。"></textarea>
         <div class="row" style="margin-top:10px">
-          <button class="btn primary" id="runBtn">후리가나 & 번역</button>
+          <button class="btn primary" id="runBtn" type="button">후리가나 & 번역</button>
         </div>
       </div>
     </details>
@@ -77,7 +77,7 @@
   <div id="kvRuby" style="font-size:12px;color:#c1cfde;margin:4px 0"><b style="color:#8fb4ff">읽기(ひらがな)</b>: <span id="popRuby"></span></div>
   <div style="font-size:12px;color:#c1cfde;margin:4px 0"><b style="color:#8fb4ff">의미</b>: <span id="popDeepl"></span></div>
   <div class="row" style="margin-top:8px">
-    <button class="btn" id="popClose">닫기</button>
+    <button class="btn" id="popClose" type="button">닫기</button>
   </div>
 </div>
 
@@ -118,7 +118,7 @@ async function callDeepL(text, src="JA", tgt="KO"){
   return withTimeout(fetcher, 45000, "DeepL");
 }
 
-/* ===== details 동작: 열리면 포커스 */
+/* ===== details 열릴 때 포커스 */
 $("#inputBox").addEventListener("toggle", ()=>{
   if($("#inputBox").open){ $("#input").focus(); }
 });
@@ -150,8 +150,6 @@ const popLemma   = $("#popLemma");
 const popRuby    = $("#popRuby");
 const kvRuby     = $("#kvRuby");
 const popDeepl   = $("#popDeepl");
-const popClose   = $("#popClose");
-let deeplCache = new Map();
 
 function openPop(x, y, payload){
   const surface = payload.surface || "";
@@ -172,17 +170,12 @@ function openPop(x, y, payload){
 
   popDeepl.textContent = "불러오는 중…";
   const key = lemma || surface;
-  if(deeplCache.has(key)){
-    popDeepl.textContent = deeplCache.get(key);
-  }else{
-    callDeepL(key, "JA", "KO").then(res=>{
-      const t = res.translation ?? res.result ?? res.data ?? "";
-      deeplCache.set(key, t);
-      popDeepl.textContent = t || "(결과 없음)";
-    }).catch(e=>{
-      popDeepl.textContent = `에러: ${e.message||String(e))}`;
-    });
-  }
+  callDeepL(key, "JA", "KO").then(res=>{
+    const t = res.translation ?? res.result ?? res.data ?? "";
+    popDeepl.textContent = t || "(결과 없음)";
+  }).catch(e=>{
+    popDeepl.textContent = `에러: ${e.message||String(e)}`;  /* ← 버그 fix */
+  });
 
   const pad=8, vw=window.innerWidth, vh=window.innerHeight;
   pop.style.left = Math.min(x+pad, vw-340)+"px";
@@ -190,7 +183,7 @@ function openPop(x, y, payload){
   pop.style.display = "block";
 }
 function closePop(){ pop.style.display = "none"; }
-popClose.addEventListener("click", closePop);
+$("#popClose").addEventListener("click", closePop);
 document.addEventListener("click", e=>{
   if(pop.style.display==="block"){
     if(!pop.contains(e.target) && !e.target.closest(".tok")) closePop();
@@ -201,7 +194,6 @@ document.addEventListener("click", e=>{
 async function runBoth(){
   const text = $("#input").value.trim();
   if(!text){
-    // 입력이 비어있으면 입력 박스를 펼치고 포커스
     const box = $("#inputBox");
     if(!box.open) box.open = true;
     $("#input").focus();
