@@ -2,109 +2,254 @@
 <html lang="ko">
 <head>
   <meta charset="utf-8" />
+  <title>Furigana + DeepL (Cloud Run & Cloudflare Worker)</title>
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>JP → KO: Furigana + DeepL</title>
   <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, "Noto Sans KR", Arial; padding:16px; max-width:820px; margin:0 auto; }
-    textarea { width:100%; height:120px; font-size:18px; padding:8px; }
-    button { padding:10px 14px; font-size:16px; margin-top:8px; }
-    .result { margin-top:16px; padding:12px; border-radius:8px; background:#f8f8f8; }
-    .ruby-area { font-size:22px; line-height:1.8; white-space:normal; word-wrap:break-word; }
-    ruby rt { font-size:14px; color:#555; display:inline; }
-    .translation { margin-top:10px; color:#222; font-size:18px; white-space:pre-wrap; }
-    .error { color:#b00020; font-size:14px; margin-top:6px; white-space:pre-wrap; }
+    :root { --bg:#0b0f14; --card:#121821; --ink:#e6edf3; --muted:#9fb0c2; --accent:#5aa9ff; --warn:#ffb870; }
+    *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--ink);font-family:system-ui, -apple-system, Segoe UI, Roboto, Noto Sans, Apple SD Gothic Neo, sans-serif}
+    header{padding:20px 24px;border-bottom:1px solid #1f2833}
+    h1{margin:0;font-size:18px}
+    main{max-width:980px;margin:0 auto;padding:24px}
+    .grid{display:grid;grid-template-columns:1fr;gap:16px}
+    @media(min-width:960px){.grid{grid-template-columns:1fr 1fr}}
+    .card{background:var(--card);border:1px solid #1f2833;border-radius:16px;padding:16px;box-shadow:0 6px 20px rgba(0,0,0,.25)}
+    .row{display:flex;gap:12px;flex-wrap:wrap;align-items:center}
+    label{font-size:12px;color:var(--muted)}
+    input[type="text"], select, textarea{
+      width:100%; background:#0e141c; color:var(--ink); border:1px solid #253140;
+      border-radius:12px; padding:10px 12px; outline:none;
+    }
+    textarea{min-height:160px; resize:vertical; font-family:inherit; line-height:1.5}
+    .btn{background:#1a2330; color:var(--ink); border:1px solid #2a3a4f; padding:10px 14px; border-radius:12px; cursor:pointer}
+    .btn:hover{background:#223046}
+    .btn.primary{background:var(--accent); color:#06111e; border-color:#2d80e4; font-weight:600}
+    .btn.warn{background:var(--warn);color:#1f1406;border-color:#e5a052}
+    .muted{color:var(--muted);font-size:12px}
+    .out{min-height:120px;background:#0e141c;border:1px solid #253140;border-radius:12px;padding:12px;overflow:auto}
+    .kbd{font:12px/1.8 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;color:#c6d0db;background:#121820;border:1px solid #2a3a4f;border-radius:6px;padding:2px 6px}
+    .tag{display:inline-block;padding:2px 8px;border:1px solid #2a3a4f;border-radius:999px;font-size:12px;color:var(--muted)}
+    .right{margin-left:auto}
+    .small{font-size:12px}
   </style>
-  <!-- 순서: kuromoji → kuroshiro -->
-  <script src="https://unpkg.com/kuromoji@0.1.2/dist/kuromoji.js"></script>
-  <script src="https://unpkg.com/kuroshiro@1.2.0/dist/kuroshiro.min.js"></script>
 </head>
 <body>
-  <h2>Japanese → Korean (Furigana + DeepL)</h2>
+<header>
+  <h1>Furigana + DeepL: GitHub Pages Client</h1>
+</header>
+<main>
+  <!-- 설정 -->
+  <section class="card">
+    <div class="row" style="gap:16px">
+      <div style="flex:1 1 360px">
+        <label>Furigana API URL (Cloud Run/Worker)</label>
+        <input id="furiganaUrl" type="text"
+          value="https://furigana-api-345684237835.asia-northeast3.run.app/furigana" />
+        <div class="muted small">예: https://furigana-api-xxxxxx.run.app/furigana 또는 https://your-worker/furigana</div>
+      </div>
+      <div style="flex:1 1 360px">
+        <label>DeepL Worker URL</label>
+        <input id="deeplUrl" type="text" placeholder="https://solitary-mud-8caf.rlaalsrbr.workers.dev/translate" />
+        <div class="muted small">예: Cloudflare Worker 프록시의 번역 엔드포인트</div>
+      </div>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <div>
+        <label>DeepL 언어</label>
+        <div class="row">
+          <select id="srcLang">
+            <option value="JA" selected>JA (일본어)</option>
+            <option value="AUTO">AUTO</option>
+            <option value="EN">EN</option>
+            <option value="KO">KO</option>
+          </select>
+          <span>→</span>
+          <select id="tgtLang">
+            <option value="KO" selected>KO (한국어)</option>
+            <option value="EN">EN</option>
+            <option value="JA">JA</option>
+          </select>
+        </div>
+      </div>
+      <div class="right row">
+        <label class="tag"><input id="perChar" type="checkbox" /> 글자 단위 루비</label>
+        <button class="btn" id="saveCfg">설정 저장</button>
+      </div>
+    </div>
+  </section>
 
-  <label for="inputText">번역/요미가나 처리할 일본어 문장</label>
-  <textarea id="inputText" placeholder="例：日本語を勉強する"></textarea>
-  <button id="runBtn">변환 & 번역</button>
+  <!-- 입력 -->
+  <section class="card">
+    <label>입력 텍스트</label>
+    <textarea id="input" placeholder="여기에 일본어 텍스트를 붙여넣고 버튼을 눌러보세요。"></textarea>
+    <div class="row" style="margin-top:10px">
+      <button class="btn" id="doFuri">① 후리가나</button>
+      <button class="btn" id="doTrans">② DeepL 번역</button>
+      <button class="btn primary" id="doBoth">③ 둘 다</button>
+      <span class="muted right">단축키: <span class="kbd">Ctrl/⌘ + Enter</span> = 둘 다</span>
+    </div>
+  </section>
 
-  <div class="result" id="resultBox" style="display:none">
-    <div class="ruby-area" id="rubyHtml"></div>
-    <div class="translation" id="translationText"></div>
-    <div class="error" id="errorText"></div>
-  </div>
+  <!-- 결과: 루비 -->
+  <section class="card">
+    <div class="row">
+      <h3 style="margin:0">후리가나 미리보기</h3>
+      <button class="btn right" id="copyRubyHtml">HTML 복사</button>
+    </div>
+    <div id="ruby" class="out" aria-live="polite"></div>
+  </section>
 
-  <script>
-    const PROXY_URL = "https://YOUR-WORKER.workers.dev/translate"; // 교체 필요
+  <!-- 결과: 번역 -->
+  <section class="card">
+    <div class="row">
+      <h3 style="margin:0">DeepL 번역</h3>
+      <button class="btn right" id="copyTrans">텍스트 복사</button>
+    </div>
+    <div id="translation" class="out" aria-live="polite"></div>
+  </section>
 
-    const inputEl = document.getElementById('inputText');
-    const btn = document.getElementById('runBtn');
-    const box = document.getElementById('resultBox');
-    const rubyEl = document.getElementById('rubyHtml');
-    const transEl = document.getElementById('translationText');
-    const errEl = document.getElementById('errorText');
+  <p class="muted small">⚠️ 브라우저에서 직접 호출하므로, Cloud Run/Worker에 <b>CORS</b> 허용이 필요합니다. FastAPI는 CORSMiddleware로 처리하세요.</p>
+</main>
 
-    let kuroshiro = null;
-    let kuroReady = false;
+<script>
+(function(){
+  const $ = sel => document.querySelector(sel);
+  const input = $("#input");
+  const rubyOut = $("#ruby");
+  const transOut = $("#translation");
 
-    async function initKuroshiro() {
-      if (kuroReady) return;
-      await new Promise((resolve, reject) => {
-        kuromoji.builder({ dicPath: "https://unpkg.com/kuromoji@0.1.2/dict/" })
-          .build((err, tokenizer) => {
-            if (err) return reject(err);
-            try {
-              kuroshiro = new Kuroshiro();
-              kuroshiro.init(tokenizer).then(() => {
-                kuroReady = true;
-                resolve();
-              }).catch(reject);
-            } catch (e) { reject(e); }
-          });
-      });
-    }
-
-    async function makeFuriganaHTML(text) {
-      if (!kuroReady) await initKuroshiro();
-      return await kuroshiro.convert(text, { mode: "furigana", to: "hiragana" });
-    }
-
-    async function translate(text) {
-      const res = await fetch(PROXY_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text, target: "KO" })
-      });
-      if (!res.ok) throw new Error("DeepL 오류: " + res.status);
-      const data = await res.json();
-      return data.translation || "";
-    }
-
-    async function runAll() {
-      const text = (inputEl.value || "").trim();
-      if (!text) { errEl.textContent = "문장을 입력하세요."; return; }
-      box.style.display = "block";
-      rubyEl.innerHTML = ""; transEl.textContent = ""; errEl.textContent = "";
-
-      try {
-        const [furiganaHtml, ko] = await Promise.all([
-          makeFuriganaHTML(text),
-          translate(text)
-        ]);
-        rubyEl.innerHTML = furiganaHtml;
-        transEl.textContent = ko;
-      } catch (e) {
-        errEl.textContent = e?.message || String(e);
-      }
-    }
-
-    btn.addEventListener('click', runAll);
-
-    // 단축어 자동실행 (?q=)
-    window.addEventListener('load', () => {
-      const q = new URLSearchParams(location.search).get('q');
-      if (q) {
-        inputEl.value = decodeURIComponent(q);
-        setTimeout(runAll, 300);
+  // ---- 설정 저장/로드 (localStorage)
+  const CFG_KEYS = ["furiganaUrl","deeplUrl","srcLang","tgtLang","perChar"];
+  function loadCfg(){
+    CFG_KEYS.forEach(k=>{
+      const el = $("#" + k);
+      const v = localStorage.getItem("cfg:" + k);
+      if(v!==null){
+        if(el.type === "checkbox") el.checked = v === "1";
+        else el.value = v;
       }
     });
-  </script>
+  }
+  function saveCfg(){
+    CFG_KEYS.forEach(k=>{
+      const el = $("#" + k);
+      const v = (el.type === "checkbox") ? (el.checked ? "1":"0") : el.value.trim();
+      localStorage.setItem("cfg:" + k, v);
+    });
+  }
+  $("#saveCfg").addEventListener("click", ()=>{ saveCfg(); alert("설정을 저장했습니다."); });
+
+  // ---- 유틸
+  const sleep = ms => new Promise(r=>setTimeout(r,ms));
+  function withTimeout(promise, ms, label="요청"){
+    const ctrl = new AbortController();
+    const t = setTimeout(()=>ctrl.abort(), ms);
+    return Promise.race([
+      promise(ctrl.signal),
+      (async()=>{ await sleep(ms+50); throw new Error(`${label} 타임아웃(${ms}ms)`); })()
+    ]).finally(()=>clearTimeout(t));
+  }
+  function setHtml(el, html){ el.innerHTML = html; }
+  function setText(el, text){ el.textContent = text; }
+  function escapeHtml(s){
+    const div=document.createElement("div");
+    div.innerText = s;
+    return div.innerHTML;
+  }
+
+  // ---- API 호출
+  async function callFurigana(text){
+    const url = $("#furiganaUrl").value.trim();
+    if(!url) throw new Error("Furigana API URL이 비었습니다.");
+    const body = { text, perChar: $("#perChar").checked };
+    const fetcher = (signal)=>fetch(url, {
+      method:"POST",
+      headers:{ "Content-Type":"application/json" },
+      body: JSON.stringify(body),
+      signal
+    }).then(r=>{
+      if(!r.ok) throw new Error(`Furigana API 오류: ${r.status}`);
+      return r.json();
+    });
+    return withTimeout(fetcher, 45000, "Furigana"); // 45s
+  }
+
+  async function callDeepL(text){
+    const url = $("#deeplUrl").value.trim();
+    if(!url) throw new Error("DeepL Worker URL이 비었습니다.");
+    const src = $("#srcLang").value, tgt = $("#tgtLang").value;
+    // NOTE: 너의 Worker가 기대하는 JSON 형태에 맞춰 조정하세요.
+    // 아래는 일반적인 형태의 예시 {text, sourceLang, targetLang} → {translation}
+    const body = { text, sourceLang: src, targetLang: tgt };
+    const fetcher = (signal)=>fetch(url, {
+      method:"POST",
+      headers:{ "Content-Type":"application/json" },
+      body: JSON.stringify(body),
+      signal
+    }).then(r=>{
+      if(!r.ok) throw new Error(`DeepL Worker 오류: ${r.status}`);
+      return r.json();
+    });
+    return withTimeout(fetcher, 45000, "DeepL");
+  }
+
+  // ---- 버튼 액션
+  async function doFuri(){
+    const text = input.value.trim();
+    if(!text){ alert("입력 텍스트가 비었습니다."); return; }
+    setHtml(rubyOut, "<em class='muted'>후리가나 생성 중…</em>");
+    try{
+      const res = await callFurigana(text);
+      // API에서 HTML은 이미 escape 처리되어 있다고 가정(서버 코드 참고)
+      setHtml(rubyOut, res.html || "<em class='muted'>결과 HTML 없음</em>");
+    }catch(e){
+      setHtml(rubyOut, `<span style="color:#ffb3b3">에러: ${escapeHtml(e.message||String(e))}</span>`);
+    }
+  }
+
+  async function doTrans(){
+    const text = input.value.trim();
+    if(!text){ alert("입력 텍스트가 비었습니다."); return; }
+    setHtml(transOut, "<em class='muted'>DeepL 번역 중…</em>");
+    try{
+      const res = await callDeepL(text);
+      const t = res.translation || res.result || res.data || "";
+      setHtml(transOut, t ? escapeHtml(t).replace(/\n/g,"<br>") : "<em class='muted'>번역 결과 없음</em>");
+    }catch(e){
+      setHtml(transOut, `<span style="color:#ffb3b3">에러: ${escapeHtml(e.message||String(e))}</span>`);
+    }
+  }
+
+  async function doBoth(){
+    const text = input.value.trim();
+    if(!text){ alert("입력 텍스트가 비었습니다."); return; }
+    await Promise.all([doFuri(), doTrans()]);
+  }
+
+  // ---- 클립보드
+  $("#copyRubyHtml").addEventListener("click", ()=>{
+    const html = rubyOut.innerHTML;
+    if(!html){ alert("복사할 HTML이 없습니다."); return; }
+    navigator.clipboard.writeText(html).then(()=>alert("루비 HTML을 복사했습니다."));
+  });
+  $("#copyTrans").addEventListener("click", ()=>{
+    const t = transOut.textContent || "";
+    if(!t){ alert("복사할 텍스트가 없습니다."); return; }
+    navigator.clipboard.writeText(t).then(()=>alert("번역 텍스트를 복사했습니다."));
+  });
+
+  // ---- 단축키
+  window.addEventListener("keydown", (e)=>{
+    if((e.ctrlKey||e.metaKey) && e.key==="Enter"){ e.preventDefault(); doBoth(); }
+  });
+
+  // 초기 로드
+  loadCfg();
+
+  // UX: URL 파라미터로도 설정 가능 ?furigana=...&deepl=...
+  const sp = new URLSearchParams(location.search);
+  if(sp.get("furigana")) $("#furiganaUrl").value = sp.get("furigana");
+  if(sp.get("deepl"))    $("#deeplUrl").value    = sp.get("deepl");
+})();
+</script>
 </body>
 </html>
