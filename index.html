@@ -22,6 +22,8 @@
     .kbd{font:12px/1 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:#cbd6e2;background:#121820;border:1px solid var(--line);border-radius:6px;padding:2px 6px}
     ruby rt{font-size:.75em;color:#b9c8d8}
     .error{color:#ffb3b3}
+    .toggle{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--muted)}
+    .toggle input{accent-color:#5aa9ff}
   </style>
 </head>
 <body>
@@ -32,6 +34,7 @@
     <div class="label">입력 텍스트</div>
     <textarea id="input" placeholder="여기에 일본어 텍스트를 붙여넣고 버튼을 누르세요。"></textarea>
     <div class="row" style="margin-top:10px">
+      <label class="toggle"><input id="perChar" type="checkbox">글자 단위 루비</label>
       <button class="btn" id="btnFuri">후리가나</button>
       <button class="btn" id="btnTrans">번역</button>
       <button class="btn primary" id="btnBoth">둘 다</button>
@@ -59,7 +62,7 @@
 </main>
 
 <script>
-/* ===== 하드코딩된 엔드포인트 (수정 금지) ===== */
+/* ===== 정확한 엔드포인트(고정) ===== */
 const FURIGANA_URL = "https://furigana-api-345684237835.asia-northeast3.run.app/furigana";
 const DEEPL_URL    = "https://solitary-mud-8caf.rlaalsrbr.workers.dev/translate";
 
@@ -77,10 +80,52 @@ function withTimeout(run, ms=45000, label="요청"){
     (async()=>{ await sleep(ms+50); throw new Error(`${label} 타임아웃(${ms}ms)`); })()
   ]).finally(()=>clearTimeout(t));
 }
+/* 카타카나→히라가나 */
+function kata2hira(s){
+  return s.replace(/[\u30a1-\u30f6]/g, ch => String.fromCharCode(ch.charCodeAt(0) - 0x60));
+}
+/* 한자 여부 */
+function hasKanji(s){ return /[\u4E00-\u9FFF]/.test(s); }
+/* 모라 단위로 읽기 분해(작은 가나/장음부호 붙여 묶기) */
+function moraSegments(hira){
+  const arr = [...hira];
+  const small = /[ゃゅょぁぃぅぇぉっゎゕゖー]/;
+  const seg = [];
+  for(const ch of arr){
+    if(seg.length && small.test(ch)) seg[seg.length-1] += ch;
+    else seg.push(ch);
+  }
+  return seg;
+}
+/* 글자 단위 루비(단순 휴리스틱): 토큰(표면, 읽기)을 한자별로 분할 */
+function perCharRuby(surface, readingHira){
+  const kanjiIdx = [...surface].map((ch,i)=>hasKanji(ch)?i:-1).filter(i=>i>=0);
+  if(kanjiIdx.length===0) return escapeHtml(surface);
+
+  const segs = moraSegments(readingHira);
+  const parts = [];
+  let segPos = 0;
+
+  for(let i=0;i<surface.length;i++){
+    const ch = surface[i];
+    if(hasKanji(ch)){
+      // 남은 한자 수와 남은 모라 수를 고려해 최소 1 모라씩 할당
+      const remainingKanji = kanjiIdx.filter(k=>k>=i).length;
+      const remainingSegs = segs.length - segPos;
+      const take = Math.max(1, Math.floor(remainingSegs/remainingKanji));
+      const rt = segs.slice(segPos, segPos+take).join('') || readingHira;
+      segPos += take;
+      parts.push(`<ruby><rb>${escapeHtml(ch)}</rb><rt>${escapeHtml(rt)}</rt></ruby>`);
+    }else{
+      parts.push(escapeHtml(ch));
+    }
+  }
+  return parts.join('');
+}
 
 /* ===== API 호출 ===== */
-async function callFurigana(text){
-  const body = { text, perChar: false }; // 단순/안정 모드
+async function callFurigana(text, wantPerChar){
+  const body = { text, perChar: wantPerChar }; // 서버가 perChar를 지원하면 그대로 사용
   const fetcher = (signal)=>fetch(FURIGANA_URL, {
     method:"POST", headers:{ "Content-Type":"application/json" },
     body: JSON.stringify(body), signal
@@ -99,13 +144,27 @@ async function callDeepL(text, src="JA", tgt="KO"){
 /* ===== 액션 ===== */
 async function doFuri(){
   const input = $("#input").value.trim();
+  const wantPerChar = $("#perChar").checked;
   if(!input){ alert("입력 텍스트가 비었습니다."); return; }
   setHtml($("#rubyOut"), "<em style='color:#9fb0c2'>생성 중…</em>");
   try{
-    const res = await callFurigana(input);
-    setHtml($("#rubyOut"), res.html || "<em style='color:#9fb0c2'>결과 없음</em>");
+    const res = await callFurigana(input, wantPerChar);
+    // 서버가 perChar를 수행해 html을 줬다면 그대로 사용
+    let html = res.html || "";
+    // 보정: 서버가 perChar를 무시해도, tokens로 글자단위 루비를 재구성(간단 휴리스틱)
+    if(wantPerChar && res.tokens && res.tokens.length){
+      const rebuilt = [];
+      for(const t of res.tokens){
+        const s = String(t.surface || "");
+        const r = kata2hira(String(t.reading || ""));
+        if(hasKanji(s) && r) rebuilt.push(perCharRuby(s, r));
+        else rebuilt.push(escapeHtml(s));
+      }
+      html = rebuilt.join("");
+    }
+    setHtml($("#rubyOut"), html || "<em style='color:#9fb0c2'>결과 없음</em>");
   }catch(e){
-    setHtml($("#rubyOut"), `<span class="error">에러: ${escapeHtml(e.message||String(e))}</span>`);
+    setHtml($("#rubyOut"), `<span class="error">에러(후리가나): ${escapeHtml(e.message||String(e))}</span>`);
   }
 }
 async function doTrans(){
@@ -117,7 +176,7 @@ async function doTrans(){
     const t = res.translation ?? res.result ?? res.data ?? "";
     setHtml($("#transOut"), t ? escapeHtml(t).replace(/\n/g,"<br>") : "<em style='color:#9fb0c2'>결과 없음</em>");
   }catch(e){
-    setHtml($("#transOut"), `<span class="error">에러: ${escapeHtml(e.message||String(e))}</span>`);
+    setHtml($("#transOut"), `<span class="error">에러(번역): ${escapeHtml(e.message||String(e))}</span>`);
   }
 }
 async function doBoth(){ await Promise.all([doFuri(), doTrans()]); }
@@ -134,7 +193,7 @@ $("#copyTrans").addEventListener("click", ()=>{
   navigator.clipboard.writeText(txt).then(()=>alert("번역 텍스트를 복사했습니다."));
 });
 
-/* ===== 이벤트 바인딩 ===== */
+/* ===== 이벤트 바인딩 & 단축키 ===== */
 $("#btnFuri").addEventListener("click", doFuri);
 $("#btnTrans").addEventListener("click", doTrans);
 $("#btnBoth").addEventListener("click", doBoth);
@@ -142,11 +201,7 @@ window.addEventListener("keydown", (e)=>{
   if((e.ctrlKey||e.metaKey) && e.key === "Enter"){ e.preventDefault(); doBoth(); }
 });
 
-/* ===== 단축어 연동: ?text=...&auto=1 지원 =====
-   - 예: https://<GH_PAGES_URL>/index.html?text=%E6%BC%A2%E5%AD%97...&auto=1
-   - text: URL-encoded 원문
-   - auto: 1이면 페이지 로딩 후 자동으로 [둘 다] 실행
-*/
+/* ===== 단축어 연동: ?text=...&auto=1 ===== */
 (function initFromQuery(){
   const sp = new URLSearchParams(location.search);
   const qText = sp.get("text");
