@@ -56,7 +56,7 @@
     }
 
     // DeepL 프록시 (Cloudflare Worker)
-    const PROXY_URL = "https://YOUR-WORKER-URL/translate";
+    const PROXY_URL = "https://solitary-mud-8caf.rlaalsrbr.workers.dev/translate";
 
     async function translate(text) {
       const res = await fetch(PROXY_URL, {
@@ -91,3 +91,4 @@
   </script>
 </body>
 </html>
+
