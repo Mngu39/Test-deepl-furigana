@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
   <meta charset="utf-8" />
-  <title>Furigana + DeepL</title>
+  <title>Furigana + 번역</title>
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <style>
     :root { --bg:#0b0f14; --card:#11161f; --ink:#e6edf3; --line:#223044; --muted:#9fb0c2; --accent:#5aa9ff; }
@@ -13,75 +13,71 @@
     .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:14px}
     .label{font-size:13px;color:var(--muted);margin-bottom:8px}
     .out{min-height:100px;background:#0e141c;border:1px solid var(--line);border-radius:10px;padding:12px;overflow:auto}
-    .right{margin-left:auto}
+    .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
     .btn{background:#182233;color:var(--ink);border:1px solid var(--line);padding:10px 14px;border-radius:10px;cursor:pointer}
     .btn:hover{background:#1e2a3f}
     .btn.primary{background:var(--accent);color:#06111e;border-color:#2d80e4;font-weight:600}
-    .kbd{font:12px/1 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:#cbd6e2;background:#121820;border:1px solid var(--line);border-radius:6px;padding:2px 6px}
-    .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
     .error{color:#ffb3b3}
-
-    /* 접히는 입력 영역 */
-    .collapser{display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none}
-    .collapser .chev{transition:transform .2s ease}
-    .collapser[aria-expanded="true"] .chev{transform:rotate(90deg)}
-    .hidden{display:none}
     textarea{width:100%;min-height:120px;background:#0e141c;color:var(--ink);border:1px solid var(--line);border-radius:10px;padding:12px;resize:vertical;line-height:1.5;font-family:inherit}
+    ruby rt{font-size:.75em;color:#b9c8d8}
 
-    /* 클릭 가능한 토큰(원문 박스 안에서 팝업 트리거) */
+    /* 접히는 입력 영역: details/summary 사용 (모바일 터치+데스크톱 클릭 모두 OK) */
+    details summary{list-style:none; cursor:pointer; display:flex; align-items:center; gap:8px; user-select:none}
+    details summary::-webkit-details-marker{display:none}
+    .chev{transition:transform .2s ease}
+    details[open] .chev{transform:rotate(90deg)}
+    .hint{margin-left:auto; color:#9fb0c2; font-size:12px}
+
+    /* 원문(후리가나) 박스에서 클릭 가능한 토큰 */
     .tok{padding:1px 2px;border-radius:6px;cursor:pointer}
     .tok:hover{background:#1a2436}
     .tok[data-clickable="0"]{cursor:default}
-    /* ruby 내부 요소가 클릭 이벤트를 가로채지 않도록 */
-    .tok ruby, .tok rb, .tok rt { pointer-events:none; }
-    ruby rt{font-size:.75em;color:#b9c8d8}
+    .tok ruby, .tok rb, .tok rt { pointer-events:none; } /* ruby 내부가 클릭 먹지 않도록 */
   </style>
 </head>
 <body>
-<header><h1>Furigana + DeepL</h1></header>
+<header><h1>Furigana + 번역</h1></header>
 <main>
 
-  <!-- 입력(제목 클릭 → 펼침). 버튼도 이 안에 숨김 -->
+  <!-- 입력(요청: 제목을 클릭하면 펼쳐져서 입력 가능, 버튼도 이 안에 숨김) -->
   <section class="card">
-    <div id="inputToggle" class="collapser" role="button" tabindex="0" aria-expanded="false" aria-controls="inputWrap">
-      <span class="chev">▶</span>
-      <strong>입력 텍스트</strong>
-      <span class="right" style="color:#9fb0c2;font-size:12px">제목을 클릭하여 펼치기 · 단축키 <span class="kbd">Ctrl/⌘+Enter</span></span>
-    </div>
-    <div id="inputWrap" class="hidden" style="margin-top:10px">
-      <textarea id="input" placeholder="여기에 일본어 텍스트를 붙여넣고 ‘후리가나 & 번역’ 버튼을 누르세요。"></textarea>
-      <div class="row" style="margin-top:10px">
-        <button class="btn primary" id="btnBoth">후리가나 & 번역</button>
+    <details id="inputBox">
+      <summary>
+        <span class="chev">▶</span>
+        <strong>입력 텍스트</strong>
+        <span class="hint">클릭하여 펼치기 · 단축키 Ctrl/⌘+Enter</span>
+      </summary>
+      <div style="margin-top:10px">
+        <textarea id="input" placeholder="일본어 텍스트를 붙여넣고 ‘후리가나 & 번역’ 버튼을 누르세요。"></textarea>
+        <div class="row" style="margin-top:10px">
+          <button class="btn primary" id="runBtn">후리가나 & 번역</button>
+        </div>
       </div>
-    </div>
+    </details>
   </section>
 
-  <!-- 결과: 원문(루비: 한자+rt 포함, 이 박스에서 토큰 클릭 팝업) -->
+  <!-- 결과: 원문(후리가나) — 여기에서 토큰 클릭 시 팝업 -->
   <section class="card">
-    <div class="label">원문(루비) — 단어를 클릭하면 팝업</div>
+    <div class="label">원문(후리가나) — 단어를 탭/클릭하면 의미 표시</div>
     <div id="rubyOut" class="out" aria-live="polite"></div>
   </section>
 
-  <!-- 결과: DeepL 번역 -->
+  <!-- 결과: 번역 -->
   <section class="card">
-    <div class="row" style="margin-bottom:8px">
-      <div class="label" style="margin:0">DeepL 번역(문장 전체)</div>
-      <button class="btn right" id="copyTrans">텍스트 복사</button>
-    </div>
+    <div class="label">번역</div>
     <div id="transOut" class="out" aria-live="polite"></div>
   </section>
 </main>
 
-<!-- 토큰 팝업 -->
-<div id="pop" class="card hidden" style="position:fixed;z-index:9999;max-width:320px">
-  <div class="label" style="margin:0 0 6px 0">형태소 정보</div>
-  <div style="font-size:12px;color:#c1cfde;margin:4px 0"><b style="color:#8fb4ff">Surface</b>: <span id="popSurface"></span></div>
-  <div style="font-size:12px;color:#c1cfde;margin:4px 0"><b style="color:#8fb4ff">Lemma</b>: <span id="popLemma"></span></div>
-  <div id="kvRuby" style="font-size:12px;color:#c1cfde;margin:4px 0"><b style="color:#8fb4ff">Ruby(ひらがな)</b>: <span id="popRuby"></span></div>
-  <div style="font-size:12px;color:#c1cfde;margin:4px 0"><b style="color:#8fb4ff">DeepL</b>: <span id="popDeepl"></span></div>
+<!-- 단어 팝업 -->
+<div id="pop" class="card" style="position:fixed;z-index:9999;max-width:320px;display:none">
+  <div class="label" style="margin:0 0 6px 0">단어 정보</div>
+  <div style="font-size:12px;color:#c1cfde;margin:4px 0"><b style="color:#8fb4ff">표면</b>: <span id="popSurface"></span></div>
+  <div style="font-size:12px;color:#c1cfde;margin:4px 0"><b style="color:#8fb4ff">기본형</b>: <span id="popLemma"></span></div>
+  <div id="kvRuby" style="font-size:12px;color:#c1cfde;margin:4px 0"><b style="color:#8fb4ff">읽기(ひらがな)</b>: <span id="popRuby"></span></div>
+  <div style="font-size:12px;color:#c1cfde;margin:4px 0"><b style="color:#8fb4ff">의미</b>: <span id="popDeepl"></span></div>
   <div class="row" style="margin-top:8px">
-    <button class="btn" id="popCopy">복사</button>
-    <button class="btn right" id="popClose">닫기</button>
+    <button class="btn" id="popClose">닫기</button>
   </div>
 </div>
 
@@ -95,7 +91,6 @@ const $ = s => document.querySelector(s);
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 function escapeHtml(s){ const d=document.createElement("div"); d.innerText=s; return d.innerHTML; }
 function escapeAttr(s){ return String(s).replace(/&/g,"&amp;").replace(/"/g,"&quot;").replace(/</g,"&lt;"); }
-function setHtml(el, html){ el.innerHTML = html; }
 function withTimeout(run, ms=45000, label="요청"){
   const ctrl = new AbortController(); const t = setTimeout(()=>ctrl.abort(), ms);
   return Promise.race([ run(ctrl.signal), (async()=>{ await sleep(ms+50); throw new Error(`${label} 타임아웃(${ms}ms)`); })() ])
@@ -123,17 +118,12 @@ async function callDeepL(text, src="JA", tgt="KO"){
   return withTimeout(fetcher, 45000, "DeepL");
 }
 
-/* ===== 입력 토글 ===== */
-const toggle = $("#inputToggle");
-const wrap   = $("#inputWrap");
-function setCollapsed(open){
-  toggle.setAttribute("aria-expanded", open ? "true" : "false");
-  wrap.classList.toggle("hidden", !open);
-}
-toggle.addEventListener("click", ()=> setCollapsed(toggle.getAttribute("aria-expanded")!=="true"));
-toggle.addEventListener("keydown", (e)=>{ if(e.key==="Enter"||e.key===" "){ e.preventDefault(); setCollapsed(toggle.getAttribute("aria-expanded")!=="true"); }});
+/* ===== details 동작: 열리면 포커스 */
+$("#inputBox").addEventListener("toggle", ()=>{
+  if($("#inputBox").open){ $("#input").focus(); }
+});
 
-/* ===== 원문(루비)용: 클릭 가능한 토큰 DOM 생성 ===== */
+/* ===== 원문(후리가나) DOM 생성 (클릭 가능) ===== */
 function buildClickableRuby(tokens){
   return tokens.map((t, idx)=>{
     const s = String(t.surface || "");
@@ -160,7 +150,6 @@ const popLemma   = $("#popLemma");
 const popRuby    = $("#popRuby");
 const kvRuby     = $("#kvRuby");
 const popDeepl   = $("#popDeepl");
-const popCopy    = $("#popCopy");
 const popClose   = $("#popClose");
 let deeplCache = new Map();
 
@@ -172,7 +161,7 @@ function openPop(x, y, payload){
   popSurface.textContent = surface;
   popLemma.textContent   = lemma;
 
-  // 팝업의 Ruby는 "히라가나만". 카나-only 표면이면 숨김
+  // 팝업의 "읽기"는 히라가나만, 표면이 카나-only면 숨김
   if(reading && !isKanaOnly(surface)){
     kvRuby.style.display = "";
     popRuby.textContent = reading;
@@ -181,7 +170,7 @@ function openPop(x, y, payload){
     popRuby.textContent = "";
   }
 
-  popDeepl.textContent = "번역 중…";
+  popDeepl.textContent = "불러오는 중…";
   const key = lemma || surface;
   if(deeplCache.has(key)){
     popDeepl.textContent = deeplCache.get(key);
@@ -198,40 +187,40 @@ function openPop(x, y, payload){
   const pad=8, vw=window.innerWidth, vh=window.innerHeight;
   pop.style.left = Math.min(x+pad, vw-340)+"px";
   pop.style.top  = Math.min(y+pad, vh-220)+"px";
-  pop.classList.remove("hidden");
+  pop.style.display = "block";
 }
-function closePop(){ pop.classList.add("hidden"); }
+function closePop(){ pop.style.display = "none"; }
 popClose.addEventListener("click", closePop);
-popCopy.addEventListener("click", ()=>{
-  const text = `Surface: ${popSurface.textContent}\nLemma: ${popLemma.textContent}\nRuby: ${popRuby.textContent}\nDeepL: ${popDeepl.textContent}`;
-  navigator.clipboard.writeText(text).then(()=>alert("팝업 내용을 복사했습니다."));
-});
-window.addEventListener("keydown", e=>{ if(e.key==="Escape") closePop(); });
 document.addEventListener("click", e=>{
-  if(!pop.classList.contains("hidden")){
+  if(pop.style.display==="block"){
     if(!pop.contains(e.target) && !e.target.closest(".tok")) closePop();
   }
 });
 
-/* ===== 실행 액션 ===== */
-async function doBoth(){
+/* ===== 실행 ===== */
+async function runBoth(){
   const text = $("#input").value.trim();
-  if(!text){ setCollapsed(true); $("#input").focus(); return; }
-  setHtml($("#rubyOut"), "<em style='color:#9fb0c2'>생성 중…</em>");
-  setHtml($("#transOut"), "<em style='color:#9fb0c2'>번역 중…</em>");
+  if(!text){
+    // 입력이 비어있으면 입력 박스를 펼치고 포커스
+    const box = $("#inputBox");
+    if(!box.open) box.open = true;
+    $("#input").focus();
+    return;
+  }
+  $("#rubyOut").innerHTML  = "<em style='color:#9fb0c2'>생성 중…</em>";
+  $("#transOut").innerHTML = "<em style='color:#9fb0c2'>번역 중…</em>";
   try{
     const [furi, tr] = await Promise.all([callFurigana(text), callDeepL(text, "JA", "KO")]);
-    // 원문(루비) 박스: 클릭 가능한 ruby DOM으로 구성
-    setHtml($("#rubyOut"), buildClickableRuby(furi.tokens || []));
+    $("#rubyOut").innerHTML = buildClickableRuby(furi.tokens || []);
     const t = tr.translation ?? tr.result ?? tr.data ?? "";
-    setHtml($("#transOut"), t ? escapeHtml(t).replace(/\n/g,"<br>") : "<em style='color:#9fb0c2'>결과 없음</em>");
+    $("#transOut").innerHTML = t ? escapeHtml(t).replace(/\n/g,"<br>") : "<em style='color:#9fb0c2'>결과 없음</em>";
   }catch(e){
-    setHtml($("#rubyOut"), `<span class="error">에러(후리가나): ${escapeHtml(e.message||String(e))}</span>`);
-    setHtml($("#transOut"), "");
+    $("#rubyOut").innerHTML = `<span class="error">에러(후리가나): ${escapeHtml(e.message||String(e))}</span>`;
+    $("#transOut").innerHTML = "";
   }
 }
 
-/* ===== 토큰 클릭 → 팝업 (원문 박스에서) ===== */
+/* 원문 박스 클릭 → 팝업 */
 $("#rubyOut").addEventListener("click", (e)=>{
   let el = e.target instanceof Element ? e.target : null;
   while(el && !el.classList.contains("tok")) el = el.parentElement;
@@ -243,15 +232,10 @@ $("#rubyOut").addEventListener("click", (e)=>{
   });
 });
 
-/* ===== 버튼/단축키 ===== */
-$("#btnBoth").addEventListener("click", doBoth);
-$("#copyTrans").addEventListener("click", ()=>{
-  const txt = $("#transOut").textContent || "";
-  if(!txt){ alert("복사할 텍스트가 없습니다."); return; }
-  navigator.clipboard.writeText(txt).then(()=>alert("번역 텍스트를 복사했습니다."));
-});
+/* 버튼/단축키 */
+$("#runBtn").addEventListener("click", runBoth);
 window.addEventListener("keydown", (e)=>{
-  if((e.ctrlKey||e.metaKey) && e.key==="Enter"){ e.preventDefault(); doBoth(); }
+  if((e.ctrlKey||e.metaKey) && e.key==="Enter"){ e.preventDefault(); runBoth(); }
 });
 
 /* ===== 단축어 연동: ?text=...&auto=1 (이중 인코딩 복원 포함) ===== */
@@ -267,8 +251,7 @@ function getQueryText(){
   const qText = getQueryText();
   if(qText){
     $("#input").value = qText;
-    // 자동 실행(입력 영역은 굳이 펼치지 않음)
-    if (new URLSearchParams(location.search).get("auto")==="1") { doBoth(); }
+    if (new URLSearchParams(location.search).get("auto")==="1") { runBoth(); }
   }
 })();
 </script>
