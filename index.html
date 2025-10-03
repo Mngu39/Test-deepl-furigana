@@ -9,16 +9,16 @@
     *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,Segoe UI,Roboto,Noto Sans,Apple SD Gothic Neo,sans-serif}
     header{padding:16px 20px;border-bottom:1px solid var(--line)}
     h1{margin:0;font-size:16px;font-weight:600}
-    main{max-width:900px;margin:0 auto;padding:20px}
+    main{max-width:1100px;margin:0 auto;padding:20px}
     .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:14px}
     .label{font-size:13px;color:var(--muted);margin-bottom:8px}
-    .out{min-height:100px;background:#0e141c;border:1px solid var(--line);border-radius:10px;padding:12px;overflow:auto}
     .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+    .right{margin-left:auto}
     .btn{background:#182233;color:var(--ink);border:1px solid var(--line);padding:10px 14px;border-radius:10px;cursor:pointer}
     .btn:hover{background:#1e2a3f}
     .btn.primary{background:var(--accent);color:#06111e;border-color:#2d80e4;font-weight:600}
     .error{color:#ffb3b3}
-    textarea{width:100%;min-height:120px;background:#0e141c;color:var(--ink);border:1px solid var(--line);border-radius:10px;padding:12px;resize:vertical;line-height:1.5;font-family:inherit}
+    textarea{width:100%;min-height:120px;background:#0e141c;color:#e6edf3;border:1px solid var(--line);border-radius:10px;padding:12px;resize:vertical;line-height:1.5}
     ruby rt{font-size:.75em;color:#b9c8d8}
 
     /* details/summary: 모바일+데스크톱 OK */
@@ -28,11 +28,15 @@
     details[open] .chev{transform:rotate(90deg)}
     .hint{margin-left:auto; color:#9fb0c2; font-size:12px}
 
-    /* 원문(후리가나) 박스에서 클릭 가능한 토큰 */
+    /* 클릭 가능한 토큰 */
     .tok{padding:1px 2px;border-radius:6px;cursor:pointer}
     .tok:hover{background:#1a2436}
     .tok[data-clickable="0"]{cursor:default}
-    .tok ruby, .tok rb, .tok rt { pointer-events:none; } /* ruby 내부가 클릭 먹지 않도록 */
+    .tok ruby, .tok rb, .tok rt { pointer-events:none; } /* ruby 내부가 클릭 가로채지 않도록 */
+
+    /* 독립 스크롤 패널 */
+    .pane{height:38vh; min-height:28vh; max-height:60vh; overflow:auto; background:#0e141c; border:1px solid var(--line); border-radius:10px; padding:12px; white-space:pre-wrap}
+    @media (max-height:760px){ .pane{height:34vh} }
   </style>
 </head>
 <body>
@@ -56,16 +60,22 @@
     </details>
   </section>
 
-  <!-- 결과: 원문(후리가나) — 여기에서 토큰 클릭 시 팝업 -->
+  <!-- 결과: 원문(루비 토글/가독 줄바꿈 포함, 독립 스크롤) -->
   <section class="card">
-    <div class="label">원문(후리가나) — 단어를 탭/클릭하면 의미 표시</div>
-    <div id="rubyOut" class="out" aria-live="polite"></div>
+    <div class="row" style="margin-bottom:8px">
+      <div class="label" style="margin:0">원문</div>
+      <label class="right" style="font-size:12px;color:#cbd6e2">
+        <input type="checkbox" id="cbBreaks"> 가독 줄바꿈
+      </label>
+      <button class="btn" id="btnToggleRuby" type="button">루비 끄기</button>
+    </div>
+    <div id="rubyOut" class="pane" aria-live="polite"></div>
   </section>
 
-  <!-- 결과: 번역 -->
+  <!-- 결과: 번역(독립 스크롤) -->
   <section class="card">
-    <div class="label">번역</div>
-    <div id="transOut" class="out" aria-live="polite"></div>
+    <div class="label" style="margin-bottom:8px">번역</div>
+    <div id="transOut" class="pane" aria-live="polite"></div>
   </section>
 </main>
 
@@ -88,26 +98,20 @@ const DEEPL_URL    = "https://solitary-mud-8caf.rlaalsrbr.workers.dev/translate"
 
 /* ===== 유틸 ===== */
 const $ = function(s){ return document.querySelector(s); };
-const sleep = function(ms){ return new Promise(function(r){ return setTimeout(r, ms); }); };
 function escapeHtml(s){ var d=document.createElement("div"); d.innerText=s; return d.innerHTML; }
-function escapeAttr(s){
-  return String(s).replace(/&/g,"&amp;").replace(/"/g,"&quot;").replace(/</g,"&lt;");
-}
-function withTimeout(run, ms, label){
-  if(ms==null) ms=45000;
-  if(!label) label="요청";
-  var ctrl = new AbortController();
-  var t = setTimeout(function(){ ctrl.abort(); }, ms);
-  return Promise.race([
-    run(ctrl.signal),
-    (async function(){ await sleep(ms+50); throw new Error(label + " 타임아웃(" + ms + "ms)"); })()
-  ]).finally(function(){ clearTimeout(t); });
-}
-function kata2hira(s){
-  return s.replace(/[\u30a1-\u30f6]/g, function(ch){ return String.fromCharCode(ch.charCodeAt(0)-0x60); });
-}
+function escapeAttr(s){ return String(s).replace(/&/g,"&amp;").replace(/"/g,"&quot;").replace(/</g,"&lt;"); }
+function kata2hira(s){ return s.replace(/[\u30a1-\u30f6]/g, function(ch){ return String.fromCharCode(ch.charCodeAt(0)-0x60); }); }
 function hasKanji(s){ return /[\u4E00-\u9FFF]/.test(s); }
 function isKanaOnly(s){ return /^[\u3040-\u309F\u30A0-\u30FF]+$/.test(s); }
+function shouldBreakAfter(surface){ return /[、。，．！？]/.test(surface); }
+function withTimeout(run, ms, label){
+  if(ms==null) ms=45000; if(!label) label="요청";
+  var ctrl = new AbortController(); var t = setTimeout(function(){ ctrl.abort(); }, ms);
+  return Promise.race([
+    run(ctrl.signal),
+    (async function(){ await new Promise(function(r){ return setTimeout(r, ms+50); }); throw new Error(label+" 타임아웃("+ms+"ms)"); })()
+  ]).finally(function(){ clearTimeout(t); });
+}
 
 /* ===== API ===== */
 async function callFurigana(text){
@@ -121,8 +125,7 @@ async function callFurigana(text){
   return withTimeout(fetcher, 45000, "Furigana");
 }
 async function callDeepL(text, src, tgt){
-  if(!src) src="JA";
-  if(!tgt) tgt="KO";
+  if(!src) src="JA"; if(!tgt) tgt="KO";
   var body = { text: text, sourceLang: src, targetLang: tgt };
   var fetcher = function(signal){
     return fetch(DEEPL_URL, {
@@ -133,29 +136,48 @@ async function callDeepL(text, src, tgt){
   return withTimeout(fetcher, 45000, "DeepL");
 }
 
-/* ===== details 열릴 때 포커스 */
-$("#inputBox").addEventListener("toggle", function(){
-  if($("#inputBox").open){ $("#input").focus(); }
-});
+/* ===== 상태 ===== */
+var lastTokens = null;
+var rubyOn = true;
+var readableBreaks = false;
 
-/* ===== 원문(후리가나) DOM 생성 (클릭 가능) ===== */
+/* ===== DOM 생성 ===== */
 function buildClickableRuby(tokens){
   return (tokens||[]).map(function(t, idx){
     var s = String(t.surface || "");
     var r = String(t.reading || "");
     var lemma = String(t.lemma || s);
     var rt = r ? kata2hira(r) : "";
-
     var inner = (hasKanji(s) && rt)
       ? '<ruby><rb>' + escapeHtml(s) + '</rb><rt>' + escapeHtml(rt) + '</rt></ruby>'
       : escapeHtml(s);
-
     var clickable = s.trim() ? "1" : "0";
-    return '<span class="tok" data-i="' + idx + '" data-clickable="' + clickable + '"' +
-           ' data-surface="' + escapeAttr(s) + '"' +
-           ' data-lemma="' + escapeAttr(lemma) + '"' +
-           ' data-reading="' + escapeAttr(rt) + '">' + inner + '</span>';
+    return '<span class="tok" data-i="'+idx+'" data-clickable="'+clickable+'"'
+         + ' data-surface="'+escapeAttr(s)+'"'
+         + ' data-lemma="'+escapeAttr(lemma)+'"'
+         + ' data-reading="'+escapeAttr(rt)+'">'+ inner +'</span>'
+         + (readableBreaks && shouldBreakAfter(s) ? '\n' : '');
   }).join("");
+}
+function buildPlain(tokens){
+  return (tokens||[]).map(function(t, idx){
+    var s = String(t.surface || "");
+    var r = String(t.reading || "");
+    var lemma = String(t.lemma || s);
+    var rt = r ? kata2hira(r) : "";
+    var clickable = s.trim() ? "1" : "0";
+    var seg = '<span class="tok" data-i="'+idx+'" data-clickable="'+clickable+'"'
+            + ' data-surface="'+escapeAttr(s)+'"'
+            + ' data-lemma="'+escapeAttr(lemma)+'"'
+            + ' data-reading="'+escapeAttr(rt)+'">'+ escapeHtml(s) +'</span>';
+    if(readableBreaks && shouldBreakAfter(s)) seg += '\n';
+    return seg;
+  }).join("");
+}
+function renderText(){
+  if(!lastTokens){ return; }
+  $("#rubyOut").innerHTML = rubyOn ? buildClickableRuby(lastTokens) : buildPlain(lastTokens);
+  $("#btnToggleRuby").textContent = rubyOn ? "루비 끄기" : "루비 켜기";
 }
 
 /* ===== 팝업 ===== */
@@ -165,33 +187,21 @@ var popLemma   = $("#popLemma");
 var popRuby    = $("#popRuby");
 var kvRuby     = $("#kvRuby");
 var popDeepl   = $("#popDeepl");
-
 function openPop(x, y, payload){
   var surface = payload.surface || "";
   var lemma   = payload.lemma   || surface;
   var reading = payload.reading || "";
-
   popSurface.textContent = surface;
   popLemma.textContent   = lemma;
-
-  // 팝업의 "읽기"는 히라가나만, 표면이 카나-only면 숨김
-  if(reading && !isKanaOnly(surface)){
-    kvRuby.style.display = "";
-    popRuby.textContent = reading;
-  } else {
-    kvRuby.style.display = "none";
-    popRuby.textContent = "";
-  }
-
+  if(reading && !isKanaOnly(surface)){ kvRuby.style.display=""; popRuby.textContent = reading; }
+  else { kvRuby.style.display="none"; popRuby.textContent=""; }
   popDeepl.textContent = "불러오는 중…";
-  var key = lemma || surface;
-  callDeepL(key, "JA", "KO").then(function(res){
+  callDeepL(lemma || surface, "JA", "KO").then(function(res){
     var t = res.translation || res.result || res.data || "";
     popDeepl.textContent = t || "(결과 없음)";
   }).catch(function(e){
-    popDeepl.textContent = "에러: " + ((e && e.message) ? e.message : String(e));
+    popDeepl.textContent = "에러: " + ((e&&e.message)?e.message:String(e));
   });
-
   var pad=8, vw=window.innerWidth, vh=window.innerHeight;
   pop.style.left = Math.min(x+pad, vw-340) + "px";
   pop.style.top  = Math.min(y+pad, vh-220) + "px";
@@ -209,17 +219,16 @@ document.addEventListener("click", function(e){
 async function runBoth(){
   var text = $("#input").value.trim();
   if(!text){
-    var box = $("#inputBox");
-    if(!box.open) box.open = true;
-    $("#input").focus();
-    return;
+    var box = $("#inputBox"); if(!box.open) box.open = true;
+    $("#input").focus(); return;
   }
   $("#rubyOut").innerHTML  = "<em style='color:#9fb0c2'>생성 중…</em>";
   $("#transOut").innerHTML = "<em style='color:#9fb0c2'>번역 중…</em>";
   try{
     var both = await Promise.all([callFurigana(text), callDeepL(text, "JA", "KO")]);
     var furi = both[0], tr = both[1];
-    $("#rubyOut").innerHTML = buildClickableRuby(furi.tokens || []);
+    lastTokens = furi.tokens || [];
+    renderText();
     var t = tr.translation || tr.result || tr.data || "";
     $("#transOut").innerHTML = t ? escapeHtml(t).replace(/\n/g,"<br>") : "<em style='color:#9fb0c2'>결과 없음</em>";
   }catch(e){
@@ -228,7 +237,10 @@ async function runBoth(){
   }
 }
 
-/* 원문 박스 클릭 → 팝업 */
+/* 이벤트 바인딩 */
+$("#runBtn").addEventListener("click", runBoth);
+$("#btnToggleRuby").addEventListener("click", function(){ rubyOn = !rubyOn; renderText(); });
+$("#cbBreaks").addEventListener("change", function(e){ readableBreaks = !!e.target.checked; renderText(); });
 $("#rubyOut").addEventListener("click", function(e){
   var el = (e.target instanceof Element) ? e.target : null;
   while(el && !el.classList.contains("tok")) el = el.parentElement;
@@ -239,11 +251,13 @@ $("#rubyOut").addEventListener("click", function(e){
     reading: el.dataset.reading || ""
   });
 });
-
-/* 버튼/단축키 */
-$("#runBtn").addEventListener("click", runBoth);
 window.addEventListener("keydown", function(e){
   if((e.ctrlKey||e.metaKey) && e.key==="Enter"){ e.preventDefault(); runBoth(); }
+});
+
+/* details 열릴 때 포커스 */
+$("#inputBox").addEventListener("toggle", function(){
+  if($("#inputBox").open){ $("#input").focus(); }
 });
 
 /* ===== 단축어 연동: ?text=...&auto=1 (이중 인코딩 복원 포함) ===== */
