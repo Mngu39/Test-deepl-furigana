@@ -6,81 +6,93 @@
   <title>JP → KO: Furigana + DeepL</title>
   <style>
     body { font-family: -apple-system, BlinkMacSystemFont, "Noto Sans KR", Arial; padding:16px; max-width:820px; margin:0 auto; }
-    label { display:block; margin-bottom:6px; }
     textarea { width:100%; height:120px; font-size:18px; padding:8px; }
     button { padding:10px 14px; font-size:16px; margin-top:8px; }
-    .block { margin-top:16px; }
-
-    /* 후리가나 표시 */
-    .ruby-area {
-      font-size:22px;
-      line-height:1.8;
-      word-wrap: break-word;
-      white-space: normal;
-    }
-    ruby rt {
-      font-size: 14px;
-      color: #555;
-      display: inline;
-    }
-
-    .result {
-      margin-top:12px;
-      padding:12px;
-      border-radius:8px;
-      background:#f8f8f8;
-      color:#222;
-      font-size:18px;
-      white-space:pre-wrap;
-      word-wrap: break-word;
-    }
-
-    .error { color:#b00020; font-size:14px; margin-top:8px; }
+    .result { margin-top:16px; padding:12px; border-radius:8px; background:#f8f8f8; }
+    .ruby-area { font-size:22px; line-height:1.6; }
+    .translation { margin-top:10px; color:#222; font-size:18px; white-space:pre-wrap; }
+    .error { color:#b00020; font-size:14px; margin-top:6px; white-space:pre-wrap; }
+    .debug { margin-top:6px; font-size:12px; color:#666; white-space:pre-wrap; }
     .dim { opacity:.5; pointer-events:none; }
   </style>
 
-  <!-- 브라우저용 UMD 번들만 사용 -->
-  <script src="https://cdn.jsdelivr.net/npm/kuroshiro@1.2.0/dist/kuroshiro.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/kuroshiro-analyzer-tinyseg@1.0.2/dist/kuroshiro-analyzer-tinyseg.min.js"></script>
+  <!-- Kuroshiro (네가 쓰는 경로 유지; 캐시무력화 숫자는 수시로 바꿔도 OK) -->
+  <script src="./vendor/kuroshiro.min.js?v=20"></script>
+  <!-- TinySegmenter 분석기(로컬) -->
+  <script src="./vendor/kuroshiro-analyzer-tinyseg.min.js?v=20"></script>
 </head>
 <body>
   <h2>Japanese → Korean (Furigana + DeepL)</h2>
 
   <label for="inputText">번역/요미가나 처리할 일본어 문장</label>
-  <textarea id="inputText" placeholder="例：日本語を勉強する"></textarea>
+  <textarea id="inputText" placeholder="例：勉強する"></textarea>
   <button id="runBtn">변환 & 번역</button>
-  <div id="err" class="error"></div>
 
-  <div class="block">
-    <strong>후리가나</strong>
-    <div id="rubyHtml" class="ruby-area"></div>
-  </div>
-
-  <div class="block">
-    <strong>번역</strong>
-    <div id="translationText" class="result"></div>
+  <div class="result" id="resultBox" style="display:none">
+    <div class="ruby-area" id="rubyHtml"></div>
+    <div class="translation" id="translationText"></div>
+    <div class="error" id="errorText"></div>
+    <div class="debug" id="debugText"></div>
   </div>
 
   <script>
-    // 본인 Cloudflare Worker 주소
-    const PROXY_URL = "https://solitary-mud-8caf.rlaalsrbr.workers.dev/translate";
+    // 1) 본인 워커 주소
+    const PROXY_URL = "https://solitary-mud-8caf.rlaalsrbr.workers.dev/translate"; // ← 여기만 바꾸면 됨
 
+    // 2) 요소
     const inputEl = document.getElementById('inputText');
-    const btn     = document.getElementById('runBtn');
-    const rubyEl  = document.getElementById('rubyHtml');
+    const btn = document.getElementById('runBtn');
+    const box = document.getElementById('resultBox');
+    const rubyEl = document.getElementById('rubyHtml');
     const transEl = document.getElementById('translationText');
-    const errEl   = document.getElementById('err');
+    const errEl = document.getElementById('errorText');
+    const dbgEl  = document.getElementById('debugText');
 
-    let kuro;
+    // ===== 디버그 표시 =====
+    function showDebug(foundPath="(미탐색)") {
+      const ks = typeof window.Kuroshiro;
+      const an = typeof window.KuroshiroAnalyzerTinySegmenter;
+      dbgEl.textContent =
+        "typeof Kuroshiro = " + ks + "\n" +
+        "typeof KuroshiroAnalyzerTinySegmenter = " + an + "\n" +
+        "ctorPath = " + foundPath;
+    }
+
+    // ===== Kuroshiro 생성자 자동탐색 =====
+    function getKuroConstructor() {
+      const k = window.Kuroshiro;
+      // 1) 정상 UMD: 함수
+      if (typeof k === "function") { showDebug("Kuroshiro"); return k; }
+      // 2) CommonJS 번들이 전역 객체로 노출된 경우
+      if (k && typeof k.default === "function") { showDebug("Kuroshiro.default"); return k.default; }
+      if (k && typeof k.Kuroshiro === "function") { showDebug("Kuroshiro.Kuroshiro"); return k.Kuroshiro; }
+      // 3) 혹시 window.default 아래로 붙는 케이스
+      if (window.default && typeof window.default.Kuroshiro === "function") { showDebug("window.default.Kuroshiro"); return window.default.Kuroshiro; }
+      if (window.default && typeof window.default === "function") { showDebug("window.default"); return window.default; }
+
+      showDebug("NOT FOUND");
+      return null;
+    }
+
+    // ===== 초기화 =====
     let kuroReady = false;
+    let kuro = null;
 
     async function initKuroshiro() {
       if (kuroReady) return;
-      kuro = new Kuroshiro();
-      await kuro.init(new Kuroshiro.Analyzer.TinySegmenter());
+      const KuroCtor = getKuroConstructor();
+      if (!KuroCtor) throw new Error("Kuroshiro 생성자를 찾을 수 없습니다. (vendor/kuroshiro.min.js 교체 권장)");
+
+      if (typeof window.KuroshiroAnalyzerTinySegmenter !== "function") {
+        throw new Error("TinySegmenter 분석기가 로드되지 않았습니다. (vendor/kuroshiro-analyzer-tinyseg.min.js 확인)");
+      }
+
+      kuro = new KuroCtor();
+      await kuro.init(new window.KuroshiroAnalyzerTinySegmenter());
       kuroReady = true;
     }
 
+    // ===== Furigana / 번역 =====
     async function makeFuriganaHTML(text) {
       if (!kuroReady) await initKuroshiro();
       return await kuro.convert(text, { mode: "furigana", to: "hiragana" });
@@ -94,25 +106,24 @@
       });
       const raw = await res.text();
       if (!res.ok) throw new Error("Worker 오류: " + res.status + " " + raw);
-      const data = JSON.parse(raw);
+      let data = {}; try { data = JSON.parse(raw); } catch(_) {}
       return data.translation || "";
     }
 
     async function runAll() {
-      const text = inputEl.value.trim();
-      errEl.textContent = ""; rubyEl.innerHTML = ""; transEl.textContent = "";
-      if (!text) { errEl.textContent = "문장을 입력하세요."; return; }
+      const text = (inputEl.value || "").trim();
+      box.style.display = "block";
+      rubyEl.innerHTML = ""; transEl.textContent = ""; errEl.textContent = "";
+
+      if (!text) { errEl.textContent = "문장을 입력(또는 단축어로 전달)하세요."; return; }
 
       btn.disabled = true; btn.classList.add('dim');
       try {
-        const [furiganaHtml, ko] = await Promise.all([
-          makeFuriganaHTML(text),
-          translate(text)
-        ]);
+        const [furiganaHtml, ko] = await Promise.all([ makeFuriganaHTML(text), translate(text) ]);
         rubyEl.innerHTML = furiganaHtml;
-        transEl.textContent = ko;
+        transEl.textContent = "→ " + ko;
       } catch (e) {
-        errEl.textContent = e.message;
+        errEl.textContent = e?.message || String(e);
       } finally {
         btn.disabled = false; btn.classList.remove('dim');
       }
@@ -120,13 +131,11 @@
 
     btn.addEventListener('click', runAll);
 
-    // 단축어 자동 실행 (?q=...)
+    // 단축어 ?q= 자동실행
     window.addEventListener('load', () => {
+      box.style.display = "block"; showDebug();
       const q = new URLSearchParams(location.search).get('q');
-      if (q) {
-        inputEl.value = decodeURIComponent(q);
-        setTimeout(runAll, 300);
-      }
+      if (q) { inputEl.value = decodeURIComponent(q); setTimeout(runAll, 300); }
     });
   </script>
 </body>
