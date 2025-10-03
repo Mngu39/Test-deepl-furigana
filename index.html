@@ -13,37 +13,40 @@
     .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:14px}
     .label{font-size:13px;color:var(--muted);margin-bottom:8px}
     .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
-    .right{margin-left:auto}
     .btn{background:#182233;color:var(--ink);border:1px solid var(--line);padding:10px 14px;border-radius:10px;cursor:pointer}
     .btn:hover{background:#1e2a3f}
     .btn.primary{background:var(--accent);color:#06111e;border-color:#2d80e4;font-weight:600}
     .error{color:#ffb3b3}
     textarea{width:100%;min-height:120px;background:#0e141c;color:#e6edf3;border:1px solid var(--line);border-radius:10px;padding:12px;resize:vertical;line-height:1.5}
     ruby{ruby-position:over}
-    ruby rt{font-size:.75em;color:#b9c8d8;opacity:1;transition:opacity .15s ease}
-    /* 루비 토글: rt만 숨겨 공간 보존 => 줄간격 동일 */
-    #rubyOut.ruby-off ruby rt{opacity:0}
-    /* 클릭 가능한 토큰 */
+    ruby rt{font-size:.8em;color:#b9c8d8;opacity:1;transition:opacity .15s ease}
+    #rubyOut.ruby-off ruby rt{opacity:0}     /* 루비 토글: 줄간격 유지 */
     .tok{padding:1px 2px;border-radius:6px;cursor:pointer}
     .tok:hover{background:#1a2436}
     .tok[data-clickable="0"]{cursor:default}
     .tok ruby, .tok rb, .tok rt { pointer-events:none; }
-    /* 독립 스크롤 패널 */
     .pane{height:38vh; min-height:28vh; max-height:60vh; overflow:auto; background:#0e141c; border:1px solid var(--line); border-radius:10px; padding:12px; white-space:pre-wrap}
     @media (max-height:760px){ .pane{height:34vh} }
-    /* details/summary */
     details summary{list-style:none; cursor:pointer; display:flex; align-items:center; gap:8px; user-select:none}
     details summary::-webkit-details-marker{display:none}
     .chev{transition:transform .2s ease}
     details[open] .chev{transform:rotate(90deg)}
     .hint{margin-left:auto; color:#9fb0c2; font-size:12px}
+
+    /* 팝업 */
+    #pop{position:fixed;z-index:9999;max-width:340px;display:none;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px}
+    .popTitle{font-size:22px;font-weight:800;line-height:1.2;display:inline-block;color:#e6edf3;text-decoration:none}
+    .popTitle rt{font-size:.7em}
+    .popSub{font-size:12px;color:#9fb0c2;margin-left:6px}
+    .popTrans{font-size:15px;color:#cfe0f2;margin-top:8px;word-break:break-word}
+    .popActions{display:flex;gap:8px;justify-content:flex-end;margin-top:10px}
   </style>
 </head>
 <body>
 <header><h1>Furigana + 번역</h1></header>
 <main>
 
-  <!-- 입력(접힘). 실행 버튼도 안에 숨김 -->
+  <!-- 입력(접힘) -->
   <section class="card">
     <details id="inputBox">
       <summary>
@@ -77,15 +80,13 @@
 </main>
 
 <!-- 단어 팝업 -->
-<div id="pop" class="card" style="position:fixed;z-index:9999;max-width:320px;display:none">
-  <!-- 상단 제목 삭제 → 선택한 글자 자체를 크게 표시 -->
-  <div id="popSurface" style="font-size:18px;font-weight:700;color:#e6edf3;margin:0 0 6px 0;word-break:break-all"></div>
-  <div style="font-size:12px;color:#c1cfde;margin:4px 0"><b style="color:#8fb4ff">기본형</b>: <span id="popLemma"></span></div>
-  <div id="kvRuby" style="font-size:12px;color:#c1cfde;margin:4px 0"><b style="color:#8fb4ff">읽기</b>: <span id="popRuby"></span></div>
-  <div style="font-size:12px;color:#c1cfde;margin:4px 0"><b style="color:#8fb4ff">의미</b>: <span id="popDeepl"></span></div>
-  <div class="row" style="margin-top:8px">
-    <button class="btn" id="popClose" type="button">닫기</button>
-  </div>
+<div id="pop">
+  <!-- 헤더: 기본형(큰 글씨, 루비), (선택 글자) 작게, 전체 링크 -->
+  <a id="popLink" class="popTitle" href="#" target="_blank" rel="noopener"></a>
+  <span id="popSub" class="popSub"></span>
+  <!-- 번역 결과 텍스트 (라벨 없음) -->
+  <div id="popDeepl" class="popTrans"></div>
+  <div class="popActions"><button class="btn" id="popClose" type="button">닫기</button></div>
 </div>
 
 <script>
@@ -160,21 +161,36 @@ function renderText(){
   $("#btnToggleRuby").textContent = rubyOn ? "루비 끄기" : "루비 켜기";
 }
 
+/* ===== 네이버 사전 링크 생성(검색 페이지로 이동) ===== */
+function buildNaverUrl(lemma){
+  var q = encodeURIComponent(lemma || "");
+  // 한국어 UI의 일본어사전도 SPA라 해시 라우팅을 씀. 검색 결과로 이동(안정).
+  return "https://ja.dict.naver.com/#/search?query=" + q;
+}
+
 /* ===== 팝업 ===== */
 var pop = $("#pop");
-var popSurface = $("#popSurface");
-var popLemma   = $("#popLemma");
-var popRuby    = $("#popRuby");
-var kvRuby     = $("#kvRuby");
-var popDeepl   = $("#popDeepl");
+var popLink = $("#popLink");
+var popSub  = $("#popSub");
+var popDeepl = $("#popDeepl");
+
 function openPop(x, y, payload){
   var surface = payload.surface || "";
   var lemma   = payload.lemma   || surface;
   var reading = payload.reading || "";
-  popSurface.textContent = surface;
-  popLemma.textContent   = lemma;
-  if(reading && !isKanaOnly(surface)){ kvRuby.style.display=""; popRuby.textContent = reading; }
-  else { kvRuby.style.display="none"; popRuby.textContent=""; }
+
+  // 헤더: 기본형을 제목으로, rt는 위에(루비), 선택 글자는 괄호로 작게
+  var titleHtml;
+  if(reading && hasKanji(lemma)){
+    titleHtml = '<ruby><rb>' + escapeHtml(lemma) + '</rb><rt>' + escapeHtml(reading) + '</rt></ruby>';
+  } else {
+    titleHtml = escapeHtml(lemma);
+  }
+  popLink.innerHTML = titleHtml;
+  popLink.href = buildNaverUrl(lemma);
+  popSub.textContent = surface && surface !== lemma ? "(" + surface + ")" : "";
+
+  // 번역
   popDeepl.textContent = "불러오는 중…";
   callDeepL(lemma || surface, "JA", "KO").then(function(res){
     var t = res.translation || res.result || res.data || "";
@@ -182,9 +198,11 @@ function openPop(x, y, payload){
   }).catch(function(e){
     popDeepl.textContent = "에러: " + ((e&&e.message)?e.message:String(e));
   });
+
+  // 위치 및 표시
   var pad=8, vw=window.innerWidth, vh=window.innerHeight;
-  pop.style.left = Math.min(x+pad, vw-340) + "px";
-  pop.style.top  = Math.min(y+pad, vh-220) + "px";
+  pop.style.left = Math.min(x+pad, vw-360) + "px";
+  pop.style.top  = Math.min(y+pad, vh-240) + "px";
   pop.style.display = "block";
 }
 function closePop(){ pop.style.display = "none"; }
