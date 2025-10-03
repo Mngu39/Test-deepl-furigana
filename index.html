@@ -19,31 +19,31 @@
     .btn.primary{background:var(--accent);color:#06111e;border-color:#2d80e4;font-weight:600}
     .error{color:#ffb3b3}
     textarea{width:100%;min-height:120px;background:#0e141c;color:#e6edf3;border:1px solid var(--line);border-radius:10px;padding:12px;resize:vertical;line-height:1.5}
-    ruby rt{font-size:.75em;color:#b9c8d8}
-
-    /* details/summary: 모바일+데스크톱 OK */
+    ruby{ruby-position:over}
+    ruby rt{font-size:.75em;color:#b9c8d8;opacity:1;transition:opacity .15s ease}
+    /* 루비 토글: rt만 숨겨 공간 보존 => 줄간격 동일 */
+    #rubyOut.ruby-off ruby rt{opacity:0}
+    /* 클릭 가능한 토큰 */
+    .tok{padding:1px 2px;border-radius:6px;cursor:pointer}
+    .tok:hover{background:#1a2436}
+    .tok[data-clickable="0"]{cursor:default}
+    .tok ruby, .tok rb, .tok rt { pointer-events:none; }
+    /* 독립 스크롤 패널 */
+    .pane{height:38vh; min-height:28vh; max-height:60vh; overflow:auto; background:#0e141c; border:1px solid var(--line); border-radius:10px; padding:12px; white-space:pre-wrap}
+    @media (max-height:760px){ .pane{height:34vh} }
+    /* details/summary */
     details summary{list-style:none; cursor:pointer; display:flex; align-items:center; gap:8px; user-select:none}
     details summary::-webkit-details-marker{display:none}
     .chev{transition:transform .2s ease}
     details[open] .chev{transform:rotate(90deg)}
     .hint{margin-left:auto; color:#9fb0c2; font-size:12px}
-
-    /* 클릭 가능한 토큰 */
-    .tok{padding:1px 2px;border-radius:6px;cursor:pointer}
-    .tok:hover{background:#1a2436}
-    .tok[data-clickable="0"]{cursor:default}
-    .tok ruby, .tok rb, .tok rt { pointer-events:none; } /* ruby 내부가 클릭 가로채지 않도록 */
-
-    /* 독립 스크롤 패널 */
-    .pane{height:38vh; min-height:28vh; max-height:60vh; overflow:auto; background:#0e141c; border:1px solid var(--line); border-radius:10px; padding:12px; white-space:pre-wrap}
-    @media (max-height:760px){ .pane{height:34vh} }
   </style>
 </head>
 <body>
 <header><h1>Furigana + 번역</h1></header>
 <main>
 
-  <!-- 입력(제목 클릭 → 펼침). 버튼도 이 안에 숨김 -->
+  <!-- 입력(접힘). 실행 버튼도 안에 숨김 -->
   <section class="card">
     <details id="inputBox">
       <summary>
@@ -60,19 +60,16 @@
     </details>
   </section>
 
-  <!-- 결과: 원문(루비 토글/가독 줄바꿈 포함, 독립 스크롤) -->
+  <!-- 원문(루비 토글, 독립 스크롤) -->
   <section class="card">
-    <div class="row" style="margin-bottom:8px">
-      <div class="label" style="margin:0">원문</div>
-      <label class="right" style="font-size:12px;color:#cbd6e2">
-        <input type="checkbox" id="cbBreaks"> 가독 줄바꿈
-      </label>
+    <div class="label" style="margin-bottom:8px">원문</div>
+    <div id="rubyOut" class="pane" aria-live="polite"></div>
+    <div class="row" style="margin-top:8px; justify-content:flex-end">
       <button class="btn" id="btnToggleRuby" type="button">루비 끄기</button>
     </div>
-    <div id="rubyOut" class="pane" aria-live="polite"></div>
   </section>
 
-  <!-- 결과: 번역(독립 스크롤) -->
+  <!-- 번역(독립 스크롤) -->
   <section class="card">
     <div class="label" style="margin-bottom:8px">번역</div>
     <div id="transOut" class="pane" aria-live="polite"></div>
@@ -81,10 +78,10 @@
 
 <!-- 단어 팝업 -->
 <div id="pop" class="card" style="position:fixed;z-index:9999;max-width:320px;display:none">
-  <div class="label" style="margin:0 0 6px 0">단어 정보</div>
-  <div style="font-size:12px;color:#c1cfde;margin:4px 0"><b style="color:#8fb4ff">표면</b>: <span id="popSurface"></span></div>
+  <!-- 상단 제목 삭제 → 선택한 글자 자체를 크게 표시 -->
+  <div id="popSurface" style="font-size:18px;font-weight:700;color:#e6edf3;margin:0 0 6px 0;word-break:break-all"></div>
   <div style="font-size:12px;color:#c1cfde;margin:4px 0"><b style="color:#8fb4ff">기본형</b>: <span id="popLemma"></span></div>
-  <div id="kvRuby" style="font-size:12px;color:#c1cfde;margin:4px 0"><b style="color:#8fb4ff">읽기(ひらがな)</b>: <span id="popRuby"></span></div>
+  <div id="kvRuby" style="font-size:12px;color:#c1cfde;margin:4px 0"><b style="color:#8fb4ff">읽기</b>: <span id="popRuby"></span></div>
   <div style="font-size:12px;color:#c1cfde;margin:4px 0"><b style="color:#8fb4ff">의미</b>: <span id="popDeepl"></span></div>
   <div class="row" style="margin-top:8px">
     <button class="btn" id="popClose" type="button">닫기</button>
@@ -103,7 +100,6 @@ function escapeAttr(s){ return String(s).replace(/&/g,"&amp;").replace(/"/g,"&qu
 function kata2hira(s){ return s.replace(/[\u30a1-\u30f6]/g, function(ch){ return String.fromCharCode(ch.charCodeAt(0)-0x60); }); }
 function hasKanji(s){ return /[\u4E00-\u9FFF]/.test(s); }
 function isKanaOnly(s){ return /^[\u3040-\u309F\u30A0-\u30FF]+$/.test(s); }
-function shouldBreakAfter(surface){ return /[、。，．！？]/.test(surface); }
 function withTimeout(run, ms, label){
   if(ms==null) ms=45000; if(!label) label="요청";
   var ctrl = new AbortController(); var t = setTimeout(function(){ ctrl.abort(); }, ms);
@@ -139,10 +135,9 @@ async function callDeepL(text, src, tgt){
 /* ===== 상태 ===== */
 var lastTokens = null;
 var rubyOn = true;
-var readableBreaks = false;
 
-/* ===== DOM 생성 ===== */
-function buildClickableRuby(tokens){
+/* ===== ruby DOM(항상 생성: rt를 CSS로 숨김) ===== */
+function buildRubyTokens(tokens){
   return (tokens||[]).map(function(t, idx){
     var s = String(t.surface || "");
     var r = String(t.reading || "");
@@ -155,28 +150,13 @@ function buildClickableRuby(tokens){
     return '<span class="tok" data-i="'+idx+'" data-clickable="'+clickable+'"'
          + ' data-surface="'+escapeAttr(s)+'"'
          + ' data-lemma="'+escapeAttr(lemma)+'"'
-         + ' data-reading="'+escapeAttr(rt)+'">'+ inner +'</span>'
-         + (readableBreaks && shouldBreakAfter(s) ? '\n' : '');
-  }).join("");
-}
-function buildPlain(tokens){
-  return (tokens||[]).map(function(t, idx){
-    var s = String(t.surface || "");
-    var r = String(t.reading || "");
-    var lemma = String(t.lemma || s);
-    var rt = r ? kata2hira(r) : "";
-    var clickable = s.trim() ? "1" : "0";
-    var seg = '<span class="tok" data-i="'+idx+'" data-clickable="'+clickable+'"'
-            + ' data-surface="'+escapeAttr(s)+'"'
-            + ' data-lemma="'+escapeAttr(lemma)+'"'
-            + ' data-reading="'+escapeAttr(rt)+'">'+ escapeHtml(s) +'</span>';
-    if(readableBreaks && shouldBreakAfter(s)) seg += '\n';
-    return seg;
+         + ' data-reading="'+escapeAttr(rt)+'">'+ inner +'</span>';
   }).join("");
 }
 function renderText(){
   if(!lastTokens){ return; }
-  $("#rubyOut").innerHTML = rubyOn ? buildClickableRuby(lastTokens) : buildPlain(lastTokens);
+  $("#rubyOut").innerHTML = buildRubyTokens(lastTokens);
+  $("#rubyOut").classList.toggle("ruby-off", !rubyOn);
   $("#btnToggleRuby").textContent = rubyOn ? "루비 끄기" : "루비 켜기";
 }
 
@@ -228,7 +208,7 @@ async function runBoth(){
     var both = await Promise.all([callFurigana(text), callDeepL(text, "JA", "KO")]);
     var furi = both[0], tr = both[1];
     lastTokens = furi.tokens || [];
-    renderText();
+    renderText(); // rt 토글 방식이라 줄간격 유지
     var t = tr.translation || tr.result || tr.data || "";
     $("#transOut").innerHTML = t ? escapeHtml(t).replace(/\n/g,"<br>") : "<em style='color:#9fb0c2'>결과 없음</em>";
   }catch(e){
@@ -239,8 +219,10 @@ async function runBoth(){
 
 /* 이벤트 바인딩 */
 $("#runBtn").addEventListener("click", runBoth);
-$("#btnToggleRuby").addEventListener("click", function(){ rubyOn = !rubyOn; renderText(); });
-$("#cbBreaks").addEventListener("change", function(e){ readableBreaks = !!e.target.checked; renderText(); });
+$("#btnToggleRuby").addEventListener("click", function(){
+  rubyOn = !rubyOn; $("#rubyOut").classList.toggle("ruby-off", !rubyOn);
+  $("#btnToggleRuby").textContent = rubyOn ? "루비 끄기" : "루비 켜기";
+});
 $("#rubyOut").addEventListener("click", function(e){
   var el = (e.target instanceof Element) ? e.target : null;
   while(el && !el.classList.contains("tok")) el = el.parentElement;
