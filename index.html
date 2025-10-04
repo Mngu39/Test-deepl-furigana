@@ -49,11 +49,12 @@
     .hint{margin-left:auto; color:#9fb0c2; font-size:12px}
 
     /* 팝업 */
-    #pop{position:fixed;z-index:9999;max-width:420px;display:none;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px}
+    #pop{position:fixed;z-index:9999;max-width:440px;display:none;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px}
     .popTitle{font-size:22px;font-weight:800;line-height:1.2;display:inline-block;color:#e6edf3;text-decoration:none}
     .popTitle rt{font-size:.7em}
     .popSub{font-size:12px;color:#9fb0c2;margin-left:6px}
     .popTrans{font-size:15px;color:#cfe0f2;margin-top:8px;word-break:break-word}
+    .popMsg{font-size:12px;color:#9fb0c2;margin-top:6px}
     .popActions{display:flex;gap:8px;justify-content:flex-end;margin-top:10px}
 
     /* 칩: 세로 나열. Anki=옅은, Learn=짙은 */
@@ -63,7 +64,7 @@
     .chip.anki{ background:var(--anki-bg); color:var(--anki-ink); border-color:var(--anki-border); cursor:pointer }
     .chip.learn{ background:var(--learn-bg); color:var(--learn-ink); border-color:var(--learn-border) }
 
-    /* Anki 설명 */
+    /* Anki 설명(줄바꿈 보존) */
     .ankiDesc{ margin-top:8px; font-size:13px; color:#cfe0f2; background:#13211a; border:1px solid #244f37; border-radius:8px; padding:8px; display:none; white-space:pre-wrap }
   </style>
 </head>
@@ -117,6 +118,8 @@
   <!-- Fallback(학습 대상=짙은 칩) -->
   <div id="popKo" class="chips" style="display:none"></div>
 
+  <div id="popMsg" class="popMsg" style="display:none"></div>
+
   <div class="popActions"><button class="btn" id="popClose" type="button">닫기</button></div>
 </div>
 
@@ -135,7 +138,26 @@ function escapeHtml(s){ const d=document.createElement("div"); d.innerText=s; re
 function escapeAttr(s){ return String(s).replace(/&/g,"&amp;").replace(/"/g,"&quot;").replace(/</g,"&lt;"); }
 function kata2hira(s){ return s.replace(/[\u30a1-\u30f6]/g, ch=>String.fromCharCode(ch.charCodeAt(0)-0x60)); }
 function hasKanji(s){ return /[\u4E00-\u9FFF]/.test(s); }
-function stripHtml(s){ return String(s||"").replace(/<[^>]*>/g,""); }
+
+/* HTML → 줄바꿈 보존 텍스트 */
+function htmlToPlainWithBreaks(html){
+  if(!html) return "";
+  let s = String(html)
+    .replace(/<\s*br\s*\/?>/gi, "\n")
+    .replace(/<\/\s*(p|div|li|h[1-6])\s*>/gi, "\n")
+    .replace(/<\s*li[^>]*>/gi, "• ");
+  const tmp = document.createElement("div");
+  tmp.innerHTML = s;
+  const text = tmp.textContent || tmp.innerText || "";
+  return text.replace(/\r\n/g,"\n").replace(/\n{3,}/g,"\n\n").trim();
+}
+
+function stripHtml(s){
+  const tmp = document.createElement("div");
+  tmp.innerHTML = String(s||"");
+  return (tmp.textContent || tmp.innerText || "").trim();
+}
+
 function withTimeout(run, ms=45000, label="요청"){
   const ctrl=new AbortController(); const t=setTimeout(()=>ctrl.abort(), ms);
   return Promise.race([
@@ -168,16 +190,19 @@ async function loadJsonGraceful(url){
   try{
     const url2 = /[^\x00-\x7F]/.test(url) ? encodeURI(url) : url; // 한글 경로 대응
     const res = await fetch(url2, { cache:"force-cache" });
-    if(!res.ok) throw new Error(String(res.status));
+    if(!res.ok) throw new Error("HTTP "+res.status);
     return await res.json();
-  }catch(_){ return null; }
+  }catch(e){
+    console.error("JSON load failed:", url, e);
+    return null;
+  }
 }
 
 /* CrowdAnki deck.json → per-char DB 빌드
    모델 필드: [Sequence, Front, Back, Explain]
    - Front  : 한자
    - Back   : "훈 음" (예: "사람 인")
-   - Explain: 설명문(HTML 가능) */
+   - Explain: 설명문(HTML 가능 → 줄바꿈 보존 텍스트로 변환) */
 function buildDbFromCrowdAnki(deck){
   const modelMap = new Map();
   const nms = deck.note_models || deck["note_models"] || [];
@@ -201,7 +226,7 @@ function buildDbFromCrowdAnki(deck){
   })(deck);
 
   function splitHunEum(backText){
-    const s = stripHtml(backText).trim();
+    const s = stripHtml(backText);
     if (!s) return {hun:"", eum:""};
     const parts = s.split(/\s+/);
     if (parts.length >= 2){
@@ -229,6 +254,7 @@ function buildDbFromCrowdAnki(deck){
     const memo  = iExpl>=0  ? vals[iExpl]  : "";
 
     const {hun, eum} = splitHunEum(back);
+    const memoText = htmlToPlainWithBreaks(memo);
 
     if(!kanji) continue;
     for (const ch of Array.from(kanji)){
@@ -245,8 +271,7 @@ function buildDbFromCrowdAnki(deck){
 
       if(hun) rec["훈"] = merge(rec["훈"], hun);
       if(eum) rec["음"] = merge(rec["음"], eum);
-      const txt = stripHtml(memo||"");
-      if (txt && txt.length > (rec["설명"]||"").length) rec["설명"] = txt;
+      if (memoText && memoText.length > (rec["설명"]||"").length) rec["설명"] = memoText;
 
       db[ch] = rec;
     }
@@ -288,7 +313,7 @@ function renderText(){
   $("#rubyOut").innerHTML = buildRubyTokens(lastTokens);
   $("#rubyOut").classList.toggle("ruby-off", !rubyOn);
   $("#btnToggleRuby").textContent = rubyOn ? "루비 끄기" : "루비 켜기";
-  // (요청대로) 원문에는 하이라이트를 적용하지 않음 → markAnkiHits 제거
+  // 원문에는 색 강조 없음(요청사항)
 }
 
 /* ===== lemma 읽기 캐시 ===== */
@@ -318,6 +343,7 @@ const popDeepl=$("#popDeepl");
 const popAnki=$("#popAnki");
 const ankiDesc=$("#ankiDesc");
 const popKo=$("#popKo");
+const popMsg=$("#popMsg");
 
 function buildNaverSearchUrl(q){
   return "https://ja.dict.naver.com/#/search?query=" + encodeURIComponent(q || "");
@@ -386,11 +412,12 @@ async function renderKoChipsForLemma(lemma, skipSet){
   popKo.innerHTML="";
 
   const db = KANJI_DB;
-  if(!db) return false;
+  if(!db) return {shown:false, reason:"KANJI_DB_NULL"};
 
   const seen = new Set(skipSet || []);
   const chips = [];
 
+  let added = 0;
   for (const ch of Array.from(lemma)){
     if (!/[\u4E00-\u9FFF]/.test(ch)) continue;
     if (seen.has(ch)) continue;
@@ -413,14 +440,15 @@ async function renderKoChipsForLemma(lemma, skipSet){
     /* 학습 대상 = 짙은 칩 */
     const chip = makeChip(label, href, "learn");
     chips.push(chip);
+    added++;
   }
 
   if (chips.length){
     chips.forEach(c=>popKo.appendChild(c));
     popKo.style.display = "flex";
-    return true;
+    return {shown:true};
   }
-  return false;
+  return {shown:false, reason: added===0 ? "NO_MATCH" : "UNKNOWN"};
 }
 
 function openPop(x, y, payload){
@@ -450,18 +478,30 @@ function openPop(x, y, payload){
     popDeepl.textContent = "에러: " + (e && e.message ? e.message : String(e));
   });
 
+  // 안내 메시지 초기화
+  popMsg.style.display="none";
+  popMsg.textContent="";
+
   // 칩: Anki(옅은) → 없으면 fallback(짙은) 추가
   (async ()=>{
     await ensureDbs();
 
     const {had, seen} = await renderAnkiChipsForLemma(lemma);
-    await renderKoChipsForLemma(lemma, had ? seen : new Set());
+    const fb = await renderKoChipsForLemma(lemma, had ? seen : new Set());
+
+    if (!had && (!fb.shown)){
+      // 왜 없는지 사용자에게 즉시 표시
+      let why = "일치하는 한자 항목이 없습니다.";
+      if (fb.reason === "KANJI_DB_NULL") why = "로컬 사전 파일을 불러오지 못했습니다. (경로/배포 확인)";
+      popMsg.textContent = why;
+      popMsg.style.display = "block";
+    }
   })();
 
   // 위치
   const pad=8, vw=window.innerWidth, vh=window.innerHeight;
-  pop.style.left = Math.min(x+pad, vw-440) + "px";
-  pop.style.top  = Math.min(y+pad, vh-320) + "px";
+  pop.style.left = Math.min(x+pad, vw-460) + "px";
+  pop.style.top  = Math.min(y+pad, vh-360) + "px";
   pop.style.display = "block";
 }
 function closePop(){ pop.style.display="none"; }
@@ -494,6 +534,7 @@ async function runBoth(){
 }
 
 /* 이벤트 */
+let lastTokens=null, rubyOn=true; // (중복 선언 방지: 이 줄이 이미 위에 있으면 삭제하세요)
 $("#runBtn").addEventListener("click", runBoth);
 $("#btnToggleRuby").addEventListener("click", ()=>{
   rubyOn = !rubyOn;
