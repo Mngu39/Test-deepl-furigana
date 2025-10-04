@@ -8,9 +8,9 @@
 <style>
   :root{
     --bg:#0b0f14; --card:#11161f; --ink:#e6edf3; --line:#223044; --muted:#9fb0c2; --accent:#5aa9ff;
-    /* ✅ 초록 테마: 아는 한자(Anki)=옅은 초록 / 모르는 한자(Learn)=선명한 초록(흰 글자) */
-    --anki-bg:#112019; --anki-border:#1f3b2d; --anki-ink:#cfe0f2;
-    --learn-bg:#0f7d59; --learn-border:#1cc98a; --learn-ink:#ffffff;
+    /* 초록 테마 */
+    --anki-bg:#112019; --anki-border:#1f3b2d; --anki-ink:#cfe0f2;      /* 아는(옅은) */
+    --learn-bg:#0f7d59; --learn-border:#1cc98a; --learn-ink:#ffffff;  /* 모르는(선명) */
   }
   *{box-sizing:border-box}
   body{margin:0;background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,Segoe UI,Roboto,Noto Sans,Apple SD Gothic Neo,sans-serif}
@@ -28,20 +28,16 @@
 
   ruby{ruby-position:over}
   ruby rt{font-size:.8em;color:#b9c8d8;opacity:1;transition:opacity .15s ease}
-  /* 루비 토글: 줄간격 유지(숨김만) */
-  #rubyOut.ruby-off ruby rt{opacity:0}
+  #rubyOut.ruby-off ruby rt{opacity:0}  /* 줄간격 유지 */
 
-  /* 원문은 강조색 없음(깔끔) */
   .tok{padding:1px 2px;border-radius:6px;cursor:pointer}
   .tok:hover{background:#1a2436}
   .tok[data-clickable="0"]{cursor:default}
   .tok ruby,.tok rb,.tok rt{pointer-events:none}
 
-  /* 독립 스크롤 */
   .pane{height:38vh;min-height:28vh;max-height:60vh;overflow:auto;background:#0e141c;border:1px solid var(--line);border-radius:10px;padding:12px;white-space:pre-wrap}
   @media (max-height:760px){.pane{height:34vh}}
 
-  /* 입력 접기 */
   details summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:8px;user-select:none}
   details summary::-webkit-details-marker{display:none}
   .chev{transition:transform .2s ease}
@@ -57,18 +53,21 @@
   .popMsg{font-size:12px;color:#9fb0c2;margin-top:8px}
   .popActions{display:flex;gap:8px;justify-content:flex-end;margin-top:10px}
 
-  /* ✅ 한자 정보 리스트 */
+  /* 한자 리스트: 얇은 단일 박스(둘 다 동일한 두께/스타일) */
   .kanjiList{display:flex;flex-direction:column;gap:8px;margin-top:8px}
   .kbox{border:1px solid var(--line);border-radius:12px;padding:8px 10px}
   .kbox.anki{background:var(--anki-bg);color:var(--anki-ink);border-color:var(--anki-border)}
   .kbox.learn{background:var(--learn-bg);color:var(--learn-ink);border-color:var(--learn-border)}
-  /* 헤더(Anki=토글 / Learn=링크) */
+
+  /* 헤더: Anki=토글, Learn=링크(바로 이동) – 화살표 제거 */
   .khead{display:flex;align-items:center;gap:8px;font-size:14px;font-weight:700}
   .khead.btn{cursor:pointer}
   .khead.link{cursor:pointer;text-decoration:none;color:inherit}
   .khead.link:hover{filter:brightness(1.08)}
-  /* 설명 */
-  .kdesc{display:none;margin-top:6px;font-size:13px;line-height:1.5;white-space:pre-wrap}
+
+  /* 설명: 같은 박스 안에서만 살짝 펼침(별도 박스 느낌 제거) */
+  .kdesc{display:none;margin-top:6px;font-size:13px;line-height:1.5;white-space:pre-wrap;
+         border-top:1px dashed rgba(255,255,255,.12); padding-top:6px}
   .kbox.open .kdesc{display:block}
 </style>
 </head>
@@ -237,7 +236,7 @@ async function ensureDbs(){
   }
 }
 
-/* ===== 상태(중복 안전) ===== */
+/* ===== 상태 ===== */
 const APP=(function(){ if(!window.__APP__) window.__APP__={lastTokens:null,rubyOn:true}; return window.__APP__; })();
 
 /* ===== 원문 렌더 ===== */
@@ -278,17 +277,18 @@ function getLemmaReading(lemma){
   }).catch(()=>{ lemmaReadCache.set(lemma,""); return ""; });
 }
 
-/* ===== 팝업: 한자 카드(Anki=토글 / Learn=바로 링크) ===== */
+/* ===== 팝업: Anki=얇은 단일 박스(토글 설명), Learn=얇은 링크 박스 ===== */
 const pop=$("#pop"), popLink=$("#popLink"), popSub=$("#popSub"), popDeepl=$("#popDeepl");
 const popAnki=$("#popAnki"), popKo=$("#popKo"), popMsg=$("#popMsg");
 
 function buildNaverSearchUrl(q){ return "https://ja.dict.naver.com/#/search?query="+encodeURIComponent(q||""); }
 
+/* 단일 박스 생성 */
 function makeKanjiBox({ch, kr, cls, descText="", dictHref=""}){
   const box=document.createElement("div");
   box.className=`kbox ${cls}`;
 
-  // 헤더: Anki=div(토글), Learn=a(바로 이동)
+  // 헤더: Anki(토글), Learn(링크)
   let head;
   if (cls==="learn" && dictHref){
     head=document.createElement("a");
@@ -298,18 +298,17 @@ function makeKanjiBox({ch, kr, cls, descText="", dictHref=""}){
     head=document.createElement("div");
     head.className="khead btn";
   }
-  head.innerHTML = `<span>${escapeHtml(ch)} · ${escapeHtml(kr||"")}</span>`;
+  head.textContent = `${ch} · ${kr||""}`;
   box.appendChild(head);
 
-  // 설명(Anki에서만 사용)
-  if (cls==="anki"){
+  // 설명(Anki만)
+  if (cls==="anki" && descText){
     const desc=document.createElement("div");
     desc.className="kdesc";
-    if (descText) desc.textContent = descText;
-    if (descText){ box.appendChild(desc); }
+    desc.textContent = descText;
+    box.appendChild(desc);
     head.addEventListener("click", ()=>{ box.classList.toggle("open"); });
   }
-
   return box;
 }
 
@@ -333,7 +332,6 @@ async function fillKanjiBoxes(lemma){
       popAnki.appendChild(makeKanjiBox({ch, kr, cls:"anki", descText:desc}));
       aCount++; continue;
     }
-
     const kRec = dbK && dbK[ch];
     if (kRec){
       const hun=kRec["훈"]||"", eum=kRec["음"]||"";
@@ -352,7 +350,7 @@ async function fillKanjiBoxes(lemma){
   }
 }
 
-/* ===== 팝업 오픈 ===== */
+/* 팝업 오픈 */
 function openPop(x,y,payload){
   const surface=payload.surface||"", lemma=payload.lemma||surface;
 
@@ -381,7 +379,7 @@ function openPop(x,y,payload){
 }
 function closePop(){ pop.style.display="none"; }
 
-/* ===== 실행 ===== */
+/* 실행 */
 async function runBoth(){
   const text=$("#input").value.trim();
   if(!text){ const box=$("#inputBox"); if(!box.open) box.open=true; $("#input").focus(); return; }
@@ -398,7 +396,7 @@ async function runBoth(){
   }
 }
 
-/* ===== 바인딩(중복 방지) ===== */
+/* 바인딩(중복 방지) */
 (function bindOnce(){
   if(window.__BOUND__) return; window.__BOUND__=true;
   $("#runBtn").addEventListener("click",runBoth);
@@ -422,7 +420,7 @@ async function runBoth(){
   $("#inputBox").addEventListener("toggle",()=>{ if($("#inputBox").open) $("#input").focus(); });
 })();
 
-/* ===== 단축어 연동 ===== */
+/* 단축어 연동 */
 function getQueryText(){
   const sp=new URLSearchParams(location.search);
   let q=sp.get("text"); if(!q) return "";
