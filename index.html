@@ -4,10 +4,16 @@
   <meta charset="utf-8" />
   <title>Furigana + 번역</title>
   <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <link rel="icon" href="data:,">
   <style>
-    :root { --bg:#0b0f14; --card:#11161f; --ink:#e6edf3; --line:#223044; --muted:#9fb0c2; --accent:#5aa9ff;
-            --anki:#2a5138; --anki-border:#2e7d4f; }
-    *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,Segoe UI,Roboto,Noto Sans,Apple SD Gothic Neo,sans-serif}
+    :root {
+      --bg:#0b0f14; --card:#11161f; --ink:#e6edf3; --line:#223044; --muted:#9fb0c2; --accent:#5aa9ff;
+      /* 팝업 칩 색상: Anki=옅은, Learn(미보유)=짙은 */
+      --anki-bg:#234031; --anki-border:#2e7d4f; --anki-ink:#d3f2de;
+      --learn-bg:#122038; --learn-border:#2d80e4; --learn-ink:#cfe0f2;
+    }
+    *{box-sizing:border-box}
+    body{margin:0;background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,Segoe UI,Roboto,Noto Sans,Apple SD Gothic Neo,sans-serif}
     header{padding:16px 20px;border-bottom:1px solid var(--line)}
     h1{margin:0;font-size:16px;font-weight:600}
     main{max-width:1100px;margin:0 auto;padding:20px}
@@ -22,23 +28,27 @@
 
     ruby{ruby-position:over}
     ruby rt{font-size:.8em;color:#b9c8d8;opacity:1;transition:opacity .15s ease}
+    /* 루비 토글: 줄간격 유지(숨김만) */
     #rubyOut.ruby-off ruby rt{opacity:0}
 
+    /* 원문 토큰: 색상 강조 제거(깔끔하게) */
     .tok{padding:1px 2px;border-radius:6px;cursor:pointer}
     .tok:hover{background:#1a2436}
     .tok[data-clickable="0"]{cursor:default}
     .tok ruby, .tok rb, .tok rt { pointer-events:none; }
 
-    .tok.anki-hit{ background:rgba(46,125,79,.2); outline:1px solid rgba(46,125,79,.35); }
-
+    /* 원문/번역 독립 스크롤 */
     .pane{height:38vh; min-height:28vh; max-height:60vh; overflow:auto; background:#0e141c; border:1px solid var(--line); border-radius:10px; padding:12px; white-space:pre-wrap}
     @media (max-height:760px){ .pane{height:34vh} }
+
+    /* 입력 접기 */
     details summary{list-style:none; cursor:pointer; display:flex; align-items:center; gap:8px; user-select:none}
     details summary::-webkit-details-marker{display:none}
     .chev{transition:transform .2s ease}
     details[open] .chev{transform:rotate(90deg)}
     .hint{margin-left:auto; color:#9fb0c2; font-size:12px}
 
+    /* 팝업 */
     #pop{position:fixed;z-index:9999;max-width:420px;display:none;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px}
     .popTitle{font-size:22px;font-weight:800;line-height:1.2;display:inline-block;color:#e6edf3;text-decoration:none}
     .popTitle rt{font-size:.7em}
@@ -46,12 +56,14 @@
     .popTrans{font-size:15px;color:#cfe0f2;margin-top:8px;word-break:break-word}
     .popActions{display:flex;gap:8px;justify-content:flex-end;margin-top:10px}
 
+    /* 칩: 세로 나열. Anki=옅은, Learn=짙은 */
     .chips{ display:flex; flex-direction:column; gap:8px; margin-top:8px }
     .chip{ display:block; width:max-content; border:1px solid var(--line); border-radius:999px; padding:6px 10px; font-size:12px; text-decoration:none }
     .chip:hover{ filter:brightness(1.08) }
-    .chip.db{ background:#182233; color:#cfe0f2; }
-    .chip.anki{ background:var(--anki); color:#d3f2de; border-color:var(--anki-border); cursor:pointer }
+    .chip.anki{ background:var(--anki-bg); color:var(--anki-ink); border-color:var(--anki-border); cursor:pointer }
+    .chip.learn{ background:var(--learn-bg); color:var(--learn-ink); border-color:var(--learn-border) }
 
+    /* Anki 설명 */
     .ankiDesc{ margin-top:8px; font-size:13px; color:#cfe0f2; background:#13211a; border:1px solid #244f37; border-radius:8px; padding:8px; display:none; white-space:pre-wrap }
   </style>
 </head>
@@ -59,6 +71,7 @@
 <header><h1>Furigana + 번역</h1></header>
 <main>
 
+  <!-- 입력(접힘) -->
   <section class="card">
     <details id="inputBox">
       <summary>
@@ -75,6 +88,7 @@
     </details>
   </section>
 
+  <!-- 원문(루비 토글, 독립 스크롤) -->
   <section class="card">
     <div class="label" style="margin-bottom:8px">원문</div>
     <div id="rubyOut" class="pane" aria-live="polite"></div>
@@ -83,33 +97,36 @@
     </div>
   </section>
 
+  <!-- 번역(독립 스크롤) -->
   <section class="card">
     <div class="label" style="margin-bottom:8px">번역</div>
     <div id="transOut" class="pane" aria-live="polite"></div>
   </section>
 </main>
 
+<!-- 단어 팝업 -->
 <div id="pop">
   <a id="popLink" class="popTitle" href="#" target="_blank" rel="noopener"></a>
   <span id="popSub" class="popSub"></span>
   <div id="popDeepl" class="popTrans"></div>
 
+  <!-- Anki 우선(옅은 칩) + 설명 -->
   <div id="popAnki" class="chips" style="display:none"></div>
   <div id="ankiDesc" class="ankiDesc"></div>
 
+  <!-- Fallback(학습 대상=짙은 칩) -->
   <div id="popKo" class="chips" style="display:none"></div>
 
   <div class="popActions"><button class="btn" id="popClose" type="button">닫기</button></div>
 </div>
 
 <script>
-/* ===== 엔드포인트 ===== */
+/* ===== 고정 엔드포인트 ===== */
 const FURIGANA_URL = "https://furigana-api-345684237835.asia-northeast3.run.app/furigana";
 const DEEPL_URL    = "https://solitary-mud-8caf.rlaalsrbr.workers.dev/translate";
 
-/* ===== 로컬 DB 경로 =====
-   CrowdAnki 폴더/파일명을 GitHub Pages에 그대로 올리고 아래 경로만 맞추면 됩니다. */
-const CROWDANKI_URL = "./일본어_한자_암기박사/deck.json";   // ← 이번 내보내기 폴더
+/* ===== 로컬 DB 경로 ===== */
+const CROWDANKI_URL = "./일본어_한자_암기박사/deck.json";   // CrowdAnki export
 const KANJI_DB_URL  = "./kanji_ko_attr_irreg.min.json";     // fallback 사전
 
 /* ===== 유틸 ===== */
@@ -126,6 +143,7 @@ function withTimeout(run, ms=45000, label="요청"){
     (async()=>{ await new Promise(r=>setTimeout(r, ms+50)); throw new Error(label+" 타임아웃("+ms+"ms)"); })()
   ]).finally(()=>clearTimeout(t));
 }
+/* 한 칸 공백 */
 const SEP_WIDE = " ";
 
 /* ===== API ===== */
@@ -143,12 +161,13 @@ async function callDeepL(text, src="JA", tgt="KO"){
 }
 
 /* ===== DB 로더 ===== */
-let KANJI_DB = null;  // fallback
+let KANJI_DB = null;  // fallback 사전
 let ANKI_DB  = null;  // CrowdAnki → per-char DB
 
 async function loadJsonGraceful(url){
   try{
-    const res = await fetch(url, { cache:"force-cache" });
+    const url2 = /[^\x00-\x7F]/.test(url) ? encodeURI(url) : url; // 한글 경로 대응
+    const res = await fetch(url2, { cache:"force-cache" });
     if(!res.ok) throw new Error(String(res.status));
     return await res.json();
   }catch(_){ return null; }
@@ -158,7 +177,7 @@ async function loadJsonGraceful(url){
    모델 필드: [Sequence, Front, Back, Explain]
    - Front  : 한자
    - Back   : "훈 음" (예: "사람 인")
-   - Explain: 설명문 (HTML 포함 가능) */
+   - Explain: 설명문(HTML 가능) */
 function buildDbFromCrowdAnki(deck){
   const modelMap = new Map();
   const nms = deck.note_models || deck["note_models"] || [];
@@ -170,7 +189,7 @@ function buildDbFromCrowdAnki(deck){
 
   const db = {}; // { "漢": {훈:"", 음:"", 설명:""} }
 
-  // 내부 탐색기로 deck 트리 어디에 있든 notes를 긁어옴
+  // deck 트리 어디에 있든 notes를 수집
   const notes = [];
   (function walk(x){
     if (!x) return;
@@ -181,7 +200,6 @@ function buildDbFromCrowdAnki(deck){
     }
   })(deck);
 
-  // "훈 음" → {훈, 음}로 분리
   function splitHunEum(backText){
     const s = stripHtml(backText).trim();
     if (!s) return {hun:"", eum:""};
@@ -191,7 +209,6 @@ function buildDbFromCrowdAnki(deck){
       const hun = parts.slice(0, -1).join(" ");
       return {hun, eum};
     }
-    // 한 토큰(예: '인'만)인 경우: 음으로 두고 훈 비우기
     if (parts.length === 1){
       return {hun:"", eum:parts[0]};
     }
@@ -203,8 +220,6 @@ function buildDbFromCrowdAnki(deck){
     const names = modelMap.get(uuid) || [];
     const vals  = note["fields"] || note["flds"] || [];
 
-    // 기대 이름 매칭
-    const iSeq = names.findIndex(n=>/^sequence$/i.test(n));
     const iFront = names.findIndex(n=>/^front$/i.test(n));
     const iBack  = names.findIndex(n=>/^back$/i.test(n));
     const iExpl  = names.findIndex(n=>/^explain$/i.test(n));
@@ -217,7 +232,7 @@ function buildDbFromCrowdAnki(deck){
 
     if(!kanji) continue;
     for (const ch of Array.from(kanji)){
-      if (!/\p{Script=Han}/u.test(ch)) continue;
+      if (!/[\u4E00-\u9FFF]/.test(ch)) continue;
       const rec = db[ch] || {"훈":"", "음":"", "설명":""};
 
       function merge(oldVal, newVal){
@@ -236,17 +251,20 @@ function buildDbFromCrowdAnki(deck){
       db[ch] = rec;
     }
   }
-
   return db;
 }
 
 async function ensureDbs(){
   if (!KANJI_DB) KANJI_DB = await loadJsonGraceful(KANJI_DB_URL);
-  if (ANKI_DB === null){  // 한 번만 빌드
+  if (ANKI_DB === null){
     const deck = await loadJsonGraceful(CROWDANKI_URL);
     ANKI_DB = deck ? buildDbFromCrowdAnki(deck) : null;
   }
 }
+
+/* ===== 상태 ===== */
+let lastTokens = null;
+let rubyOn = true;
 
 /* ===== ruby DOM ===== */
 function buildRubyTokens(tokens){
@@ -265,17 +283,12 @@ function buildRubyTokens(tokens){
          + ' data-reading="'+escapeAttr(rt)+'">'+ inner +'</span>';
   }).join("");
 }
-function markAnkiHits(){
-  if(!ANKI_DB || !lastTokens) return;
-  const wrap = $("#rubyOut");
-  wrap.querySelectorAll(".tok").forEach(el=>{
-    const lemma = el.dataset.lemma || el.dataset.surface || "";
-    let hit=false;
-    for(const ch of Array.from(lemma)){
-      if(/\p{Script=Han}/u.test(ch) && ANKI_DB[ch]) { hit=true; break; }
-    }
-    el.classList.toggle("anki-hit", !!hit);
-  });
+function renderText(){
+  if(!lastTokens) return;
+  $("#rubyOut").innerHTML = buildRubyTokens(lastTokens);
+  $("#rubyOut").classList.toggle("ruby-off", !rubyOn);
+  $("#btnToggleRuby").textContent = rubyOn ? "루비 끄기" : "루비 켜기";
+  // (요청대로) 원문에는 하이라이트를 적용하지 않음 → markAnkiHits 제거
 }
 
 /* ===== lemma 읽기 캐시 ===== */
@@ -309,7 +322,7 @@ const popKo=$("#popKo");
 function buildNaverSearchUrl(q){
   return "https://ja.dict.naver.com/#/search?query=" + encodeURIComponent(q || "");
 }
-function makeChip(label, href, cls="db", onClick=null){
+function makeChip(label, href, cls, onClick=null){
   const a = document.createElement(onClick ? "button" : "a");
   a.className = `chip ${cls}`;
   if(onClick){
@@ -371,6 +384,7 @@ async function renderAnkiChipsForLemma(lemma){
 async function renderKoChipsForLemma(lemma, skipSet){
   popKo.style.display="none";
   popKo.innerHTML="";
+
   const db = KANJI_DB;
   if(!db) return false;
 
@@ -396,7 +410,8 @@ async function renderKoChipsForLemma(lemma, skipSet){
     const label = kr ? `${ch} · ${kr}` : ch;
     const href  = "https://hanja.dict.naver.com/#/search?query=" + encodeURIComponent(ch);
 
-    const chip = makeChip(label, href, "db");
+    /* 학습 대상 = 짙은 칩 */
+    const chip = makeChip(label, href, "learn");
     chips.push(chip);
   }
 
@@ -412,10 +427,12 @@ function openPop(x, y, payload){
   const surface = payload.surface || "";
   const lemma   = payload.lemma   || surface;
 
+  // 헤더
   popLink.innerHTML = escapeHtml(lemma);
   popLink.href = buildNaverSearchUrl(lemma);
   popSub.textContent = (surface && surface!==lemma) ? "(" + surface + ")" : "";
 
+  // 기본형 읽기(rt)
   if(hasKanji(lemma)){
     getLemmaReading(lemma).then(rt=>{
       popLink.innerHTML = rt
@@ -424,6 +441,7 @@ function openPop(x, y, payload){
     });
   }
 
+  // 기본형 번역
   popDeepl.textContent="불러오는 중…";
   callDeepL(lemma, "JA", "KO").then(res=>{
     const t = res.translation || res.result || res.data || "";
@@ -432,14 +450,15 @@ function openPop(x, y, payload){
     popDeepl.textContent = "에러: " + (e && e.message ? e.message : String(e));
   });
 
+  // 칩: Anki(옅은) → 없으면 fallback(짙은) 추가
   (async ()=>{
     await ensureDbs();
+
     const {had, seen} = await renderAnkiChipsForLemma(lemma);
-    if(KANJI_DB){
-      await renderKoChipsForLemma(lemma, had ? seen : new Set());
-    }
+    await renderKoChipsForLemma(lemma, had ? seen : new Set());
   })();
 
+  // 위치
   const pad=8, vw=window.innerWidth, vh=window.innerHeight;
   pop.style.left = Math.min(x+pad, vw-440) + "px";
   pop.style.top  = Math.min(y+pad, vh-320) + "px";
@@ -454,17 +473,6 @@ document.addEventListener("click", (e)=>{
 });
 
 /* ===== 실행 ===== */
-let lastTokens=null;
-let rubyOn=true;
-
-function renderText(){
-  if(!lastTokens) return;
-  $("#rubyOut").innerHTML = buildRubyTokens(lastTokens);
-  $("#rubyOut").classList.toggle("ruby-off", !rubyOn);
-  $("#btnToggleRuby").textContent = rubyOn ? "루비 끄기" : "루비 켜기";
-  ensureDbs().then(()=>markAnkiHits());
-}
-
 async function runBoth(){
   const text = $("#input").value.trim();
   if(!text){
@@ -476,7 +484,7 @@ async function runBoth(){
   try{
     const [furi, tr] = await Promise.all([callFurigana(text), callDeepL(text, "JA", "KO")]);
     lastTokens = furi.tokens || [];
-    renderText();
+    renderText(); // rt 토글 방식이라 줄간격 유지
     const t = tr.translation || tr.result || tr.data || "";
     $("#transOut").innerHTML = t ? escapeHtml(t).replace(/\n/g,"<br>") : "<em style='color:#9fb0c2'>결과 없음</em>";
   }catch(e){
@@ -508,7 +516,7 @@ $("#inputBox").addEventListener("toggle", ()=>{
   if($("#inputBox").open){ $("#input").focus(); }
 });
 
-/* ===== 단축어 연동 ===== */
+/* ===== 단축어 연동: ?text=...&auto=1 ===== */
 function getQueryText(){
   const sp=new URLSearchParams(location.search);
   let q = sp.get("text");
@@ -527,5 +535,3 @@ function getQueryText(){
 </script>
 </body>
 </html>
-
-
