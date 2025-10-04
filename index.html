@@ -277,13 +277,6 @@ function markAnkiHits(){
     el.classList.toggle("anki-hit", !!hit);
   });
 }
-function renderText(){
-  if(!lastTokens) return;
-  $("#rubyOut").innerHTML = buildRubyTokens(lastTokens);
-  $("#rubyOut").classList.toggle("ruby-off", !rubyOn);
-  $("#btnToggleRuby").textContent = rubyOn ? "루비 끄기" : "루비 켜기";
-  ensureDbs().then(()=>markAnkiHits());
-}
 
 /* ===== lemma 읽기 캐시 ===== */
 const lemmaReadCache=new Map();
@@ -534,4 +527,5 @@ function getQueryText(){
 </script>
 </body>
 </html>
+
 
