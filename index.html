@@ -63,16 +63,18 @@
   .popMsg{font-size:12px;color:#9fb0c2;margin-top:8px}
   .popActions{display:flex;gap:8px;justify-content:flex-end;margin-top:10px}
 
-  /* 한자 리스트: 얇은 단일 박스(둘 다 동일 두께) */
+  /* 한자 리스트: 얇은 단일 박스 */
   .kanjiList{display:flex;flex-direction:column;gap:8px;margin-top:8px}
   .kbox{border:1px solid var(--line);border-radius:12px;padding:8px 10px}
   .kbox.anki{background:var(--anki-bg);color:var(--anki-ink);border-color:var(--anki-border)}
   .kbox.learn{background:var(--learn-bg);color:var(--learn-ink);border-color:var(--learn-border)}
+
   /* 헤더: Anki=토글, Learn=링크 */
   .khead{display:flex;align-items:center;gap:8px;font-size:14px;font-weight:700;background:transparent;border:0;padding:0;border-radius:0}
   .khead.toggle{cursor:pointer}
   .khead.link{cursor:pointer;text-decoration:none;color:inherit}
   .khead.link:hover{filter:brightness(1.08)}
+
   /* 설명: 같은 박스 내부에서만 펼침 */
   .kdesc{display:none;margin-top:6px;font-size:13px;line-height:1.5;white-space:pre-wrap;
          border-top:1px dashed rgba(255,255,255,.12); padding-top:6px}
@@ -170,8 +172,7 @@ async function callDeepL(text,src="JA",tgt="KO"){
 
 /* ===== DeepL 스마트 번역 ===== */
 function splitForTranslate(text, maxLen = 3000){
-  const parts = [];
-  let buf = "";
+  const parts = []; let buf = "";
   const segs = String(text).split(/(?<=[。！？!?]|[\r\n]+)/);
   for(const s of segs){
     if ((buf + s).length > maxLen){
@@ -179,12 +180,8 @@ function splitForTranslate(text, maxLen = 3000){
       if (s.length > maxLen){
         for (let i=0;i<s.length;i+=maxLen) parts.push(s.slice(i, i+maxLen));
         buf = "";
-      } else {
-        buf = s;
-      }
-    } else {
-      buf += s;
-    }
+      } else { buf = s; }
+    } else { buf += s; }
   }
   if (buf) parts.push(buf);
   return parts;
@@ -193,7 +190,7 @@ async function translateSmart(text, src="JA", tgt="KO"){
   const chunks = splitForTranslate(text);
   const out = [];
   for (const [i,chunk] of chunks.entries()){
-    let tries=0, lastErr=null;
+    let tries=0;
     while(tries<2){
       try{
         const r = await callDeepL(chunk, src, tgt);
@@ -201,8 +198,7 @@ async function translateSmart(text, src="JA", tgt="KO"){
         out.push(t || chunk);
         break;
       }catch(e){
-        lastErr = e; tries++;
-        if (tries>=2) out.push(`(번역 실패) ${chunk}`);
+        tries++; if (tries>=2) out.push(`(번역 실패) ${chunk}`);
         await new Promise(r=>setTimeout(r, 300+200*i));
       }
     }
@@ -325,23 +321,34 @@ function getLemmaReading(lemma){
   }).catch(()=>{ lemmaReadCache.set(lemma,""); return ""; });
 }
 
-/* ===== 팝업 위치 계산 ===== */
-function positionPopup(x, y){
+/* ===== 팝업 위치: 토큰 바로 아래 정렬(잘리면 좌/우·필요시 위) ===== */
+function positionPopupToToken(tokEl){
   const pad = 8;
+  // 측정을 위해 잠시 보이게
   pop.style.visibility = "hidden";
   pop.style.display = "block";
-  const rect = pop.getBoundingClientRect();
-  let vw = window.innerWidth, vh = window.innerHeight;
 
-  let left = x + pad;
-  let top  = y + pad;
+  const prect = tokEl.getBoundingClientRect();           // 토큰 위치(뷰포트 기준)
+  const rect  = pop.getBoundingClientRect();             // 팝업 크기
+  const vw = window.innerWidth, vh = window.innerHeight;
 
-  if (left + rect.width  + pad > vw) left = Math.max(vw - rect.width - pad, pad);
-  if (top  + rect.height + pad > vh) top  = Math.max(vh - rect.height - pad, pad);
+  let left = prect.left;                 // 기본: 토큰의 왼쪽에 맞춤
+  let top  = prect.bottom + 6;           // 기본: 토큰 아래 6px
 
-  if (vw < 600){
+  // 우측 넘침 → 왼쪽으로 당김
+  if (left + rect.width + pad > vw) left = Math.max(vw - rect.width - pad, pad);
+  // 좌측 넘침 → 패딩 내로
+  if (left < pad) left = pad;
+
+  // 하단 넘침 심하면 위로 올림(그래도 넘치면 클램프)
+  if (top + rect.height + pad > vh){
+    const tryTop = prect.top - rect.height - 6;
+    top = (tryTop >= pad) ? tryTop : Math.max(vh - rect.height - pad, pad);
+  }
+
+  // 모바일 아주 좁을 때는 중앙 정렬이 더 낫다
+  if (vw < 360){
     left = Math.max((vw - rect.width)/2, pad);
-    top  = Math.max((vh - rect.height)/2, pad);
   }
 
   pop.style.left = `${left}px`;
@@ -425,7 +432,7 @@ async function fillKanjiBoxes(lemma){
 }
 
 /* ===== 팝업 오픈/닫기 ===== */
-function openPop(x,y,payload){
+function openPopBelowToken(tokEl, payload){
   const surface=payload.surface||"", lemma=payload.lemma||surface;
 
   popLink.innerHTML=escapeHtml(lemma);
@@ -445,7 +452,7 @@ function openPop(x,y,payload){
   }).catch(e=>{ popDeepl.textContent="에러: "+(e&&e.message?e.message:String(e)); });
 
   fillKanjiBoxes(lemma);
-  positionPopup(x, y);
+  positionPopupToToken(tokEl);
 }
 function closePop(){ pop.style.display="none"; }
 
@@ -478,7 +485,7 @@ async function runBoth(){
     let el=(e.target instanceof Element)?e.target:null;
     while(el && !el.classList.contains("tok")) el=el.parentElement;
     if(!el || el.dataset.clickable==="0") return;
-    openPop(e.clientX||20,e.clientY||20,{surface:el.dataset.surface||"", lemma:el.dataset.lemma||""});
+    openPopBelowToken(el,{surface:el.dataset.surface||"", lemma:el.dataset.lemma||""});
   });
   document.addEventListener("click",(e)=>{
     if(pop.style.display==="block"){
