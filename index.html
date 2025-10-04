@@ -44,8 +44,18 @@
   details[open] .chev{transform:rotate(90deg)}
   .hint{margin-left:auto;color:#9fb0c2;font-size:12px}
 
-  /* 팝업 */
-  #pop{position:fixed;z-index:9999;max-width:480px;display:none;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px}
+  /* 팝업: 모바일 잘림 방지 */
+  #pop{
+    position:fixed; z-index:9999;
+    max-width:min(92vw,520px);
+    max-height:80vh;
+    overflow:auto; -webkit-overflow-scrolling:touch;
+    background:var(--card); border:1px solid var(--line);
+    border-radius:14px; padding:14px; display:none;
+  }
+  @supports (height: 1dvh){
+    #pop{ max-height:80dvh; }
+  }
   .popTitle{font-size:22px;font-weight:800;line-height:1.2;display:inline-block;color:#e6edf3;text-decoration:none}
   .popTitle rt{font-size:.7em}
   .popSub{font-size:12px;color:#9fb0c2;margin-left:6px}
@@ -53,20 +63,17 @@
   .popMsg{font-size:12px;color:#9fb0c2;margin-top:8px}
   .popActions{display:flex;gap:8px;justify-content:flex-end;margin-top:10px}
 
-  /* 한자 리스트: 얇은 단일 박스(둘 다 동일한 두께/스타일) */
+  /* 한자 리스트: 얇은 단일 박스(둘 다 동일 두께) */
   .kanjiList{display:flex;flex-direction:column;gap:8px;margin-top:8px}
   .kbox{border:1px solid var(--line);border-radius:12px;padding:8px 10px}
   .kbox.anki{background:var(--anki-bg);color:var(--anki-ink);border-color:var(--anki-border)}
   .kbox.learn{background:var(--learn-bg);color:var(--learn-ink);border-color:var(--learn-border)}
-
-  /* 헤더: Anki=토글, Learn=링크(바로 이동) – 화살표 제거 */
-  .khead{display:flex;align-items:center;gap:8px;font-size:14px;font-weight:700}
+  /* 헤더: Anki=토글, Learn=링크 */
+  .khead{display:flex;align-items:center;gap:8px;font-size:14px;font-weight:700;background:transparent;border:0;padding:0;border-radius:0}
   .khead.toggle{cursor:pointer}
-  .khead{background:transparent;border:0;padding:0;border-radius:0} /* 안전장치 */
   .khead.link{cursor:pointer;text-decoration:none;color:inherit}
   .khead.link:hover{filter:brightness(1.08)}
-
-  /* 설명: 같은 박스 안에서만 살짝 펼침(별도 박스 느낌 제거) */
+  /* 설명: 같은 박스 내부에서만 펼침 */
   .kdesc{display:none;margin-top:6px;font-size:13px;line-height:1.5;white-space:pre-wrap;
          border-top:1px dashed rgba(255,255,255,.12); padding-top:6px}
   .kbox.open .kdesc{display:block}
@@ -161,6 +168,48 @@ async function callDeepL(text,src="JA",tgt="KO"){
   return withTimeout(fetcher,45000,"DeepL");
 }
 
+/* ===== DeepL 스마트 번역 ===== */
+function splitForTranslate(text, maxLen = 3000){
+  const parts = [];
+  let buf = "";
+  const segs = String(text).split(/(?<=[。！？!?]|[\r\n]+)/);
+  for(const s of segs){
+    if ((buf + s).length > maxLen){
+      if (buf) parts.push(buf);
+      if (s.length > maxLen){
+        for (let i=0;i<s.length;i+=maxLen) parts.push(s.slice(i, i+maxLen));
+        buf = "";
+      } else {
+        buf = s;
+      }
+    } else {
+      buf += s;
+    }
+  }
+  if (buf) parts.push(buf);
+  return parts;
+}
+async function translateSmart(text, src="JA", tgt="KO"){
+  const chunks = splitForTranslate(text);
+  const out = [];
+  for (const [i,chunk] of chunks.entries()){
+    let tries=0, lastErr=null;
+    while(tries<2){
+      try{
+        const r = await callDeepL(chunk, src, tgt);
+        const t = r.translation || r.result || r.data || "";
+        out.push(t || chunk);
+        break;
+      }catch(e){
+        lastErr = e; tries++;
+        if (tries>=2) out.push(`(번역 실패) ${chunk}`);
+        await new Promise(r=>setTimeout(r, 300+200*i));
+      }
+    }
+  }
+  return out.join("\n");
+}
+
 /* ===== DB 로드 ===== */
 let KANJI_DB=null, ANKI_DB=null;
 async function loadJsonGraceful(url){
@@ -171,7 +220,6 @@ async function loadJsonGraceful(url){
     return await r.json();
   }catch(e){ console.error("JSON load failed:",url,e); return null; }
 }
-
 function buildDbFromCrowdAnki(deck){
   const modelMap=new Map();
   const nms=deck.note_models||deck["note_models"]||[];
@@ -228,7 +276,6 @@ function buildDbFromCrowdAnki(deck){
   }
   return db;
 }
-
 async function ensureDbs(){
   if(!KANJI_DB) KANJI_DB=await loadJsonGraceful(KANJI_DB_URL);
   if(ANKI_DB===null){
@@ -278,18 +325,40 @@ function getLemmaReading(lemma){
   }).catch(()=>{ lemmaReadCache.set(lemma,""); return ""; });
 }
 
-/* ===== 팝업: Anki=얇은 단일 박스(토글 설명), Learn=얇은 링크 박스 ===== */
+/* ===== 팝업 위치 계산 ===== */
+function positionPopup(x, y){
+  const pad = 8;
+  pop.style.visibility = "hidden";
+  pop.style.display = "block";
+  const rect = pop.getBoundingClientRect();
+  let vw = window.innerWidth, vh = window.innerHeight;
+
+  let left = x + pad;
+  let top  = y + pad;
+
+  if (left + rect.width  + pad > vw) left = Math.max(vw - rect.width - pad, pad);
+  if (top  + rect.height + pad > vh) top  = Math.max(vh - rect.height - pad, pad);
+
+  if (vw < 600){
+    left = Math.max((vw - rect.width)/2, pad);
+    top  = Math.max((vh - rect.height)/2, pad);
+  }
+
+  pop.style.left = `${left}px`;
+  pop.style.top  = `${top}px`;
+  pop.style.visibility = "visible";
+}
+
+/* ===== 팝업: Anki=토글 설명, Learn=링크 ===== */
 const pop=$("#pop"), popLink=$("#popLink"), popSub=$("#popSub"), popDeepl=$("#popDeepl");
 const popAnki=$("#popAnki"), popKo=$("#popKo"), popMsg=$("#popMsg");
 
 function buildNaverSearchUrl(q){ return "https://ja.dict.naver.com/#/search?query="+encodeURIComponent(q||""); }
 
-/* 단일 박스 생성 */
 function makeKanjiBox({ch, kr, cls, descText="", dictHref=""}){
   const box=document.createElement("div");
   box.className=`kbox ${cls}`;
 
-  // 헤더: Anki(토글), Learn(링크)
   let head;
   if (cls==="learn" && dictHref){
     head=document.createElement("a");
@@ -302,7 +371,6 @@ function makeKanjiBox({ch, kr, cls, descText="", dictHref=""}){
   head.textContent = `${ch} · ${kr||""}`;
   box.appendChild(head);
 
-  // 설명(Anki만)
   if (cls==="anki" && descText){
     const desc=document.createElement("div");
     desc.className="kdesc";
@@ -312,7 +380,6 @@ function makeKanjiBox({ch, kr, cls, descText="", dictHref=""}){
   }
   return box;
 }
-
 async function fillKanjiBoxes(lemma){
   popAnki.style.display="none"; popAnki.innerHTML="";
   popKo.style.display="none";   popKo.innerHTML="";
@@ -345,13 +412,19 @@ async function fillKanjiBoxes(lemma){
 
   if (aCount>0) popAnki.style.display="flex";
   if (kCount>0) popKo.style.display="flex";
-  if (aCount===0 && kCount===0){
-    popMsg.textContent = dbK ? "일치하는 한자 항목이 없습니다." : "로컬 사전 파일을 불러오지 못했습니다(kanji_ko_attr_irreg.min.json 경로 확인).";
+
+  const hasAnyKanji = /[\u4E00-\u9FFF]/.test(lemma);
+  if (hasAnyKanji && aCount===0 && kCount===0){
+    popMsg.textContent = KANJI_DB
+      ? "일치하는 한자 항목이 없습니다."
+      : "로컬 사전 파일을 불러오지 못했습니다(kanji_ko_attr_irreg.min.json 경로 확인).";
     popMsg.style.display="block";
+  } else {
+    popMsg.style.display="none";
   }
 }
 
-/* 팝업 오픈 */
+/* ===== 팝업 오픈/닫기 ===== */
 function openPop(x,y,payload){
   const surface=payload.surface||"", lemma=payload.lemma||surface;
 
@@ -372,32 +445,27 @@ function openPop(x,y,payload){
   }).catch(e=>{ popDeepl.textContent="에러: "+(e&&e.message?e.message:String(e)); });
 
   fillKanjiBoxes(lemma);
-
-  const pad=8, vw=window.innerWidth, vh=window.innerHeight;
-  pop.style.left=Math.min(x+pad, vw-500)+"px";
-  pop.style.top =Math.min(y+pad, vh-380)+"px";
-  pop.style.display="block";
+  positionPopup(x, y);
 }
 function closePop(){ pop.style.display="none"; }
 
-/* 실행 */
+/* ===== 실행 ===== */
 async function runBoth(){
   const text=$("#input").value.trim();
   if(!text){ const box=$("#inputBox"); if(!box.open) box.open=true; $("#input").focus(); return; }
   $("#rubyOut").innerHTML="<em style='color:#9fb0c2'>생성 중…</em>";
   $("#transOut").innerHTML="<em style='color:#9fb0c2'>번역 중…</em>";
   try{
-    const [furi,tr]=await Promise.all([callFurigana(text),callDeepL(text,"JA","KO")]);
+    const [furi, tstr] = await Promise.all([callFurigana(text), translateSmart(text,"JA","KO")]);
     APP.lastTokens=furi.tokens||[]; renderText();
-    const t=tr.translation||tr.result||tr.data||"";
-    $("#transOut").innerHTML=t?escapeHtml(t).replace(/\n/g,"<br>"):"<em style='color:#9fb0c2'>결과 없음</em>";
+    $("#transOut").innerHTML=tstr?escapeHtml(tstr).replace(/\n/g,"<br>"):"<em style='color:#9fb0c2'>결과 없음</em>";
   }catch(e){
     $("#rubyOut").innerHTML='<span class="error">에러(후리가나): '+escapeHtml(e&&e.message?e.message:String(e))+'</span>';
     $("#transOut").innerHTML="";
   }
 }
 
-/* 바인딩(중복 방지) */
+/* ===== 바인딩(중복 방지) ===== */
 (function bindOnce(){
   if(window.__BOUND__) return; window.__BOUND__=true;
   $("#runBtn").addEventListener("click",runBoth);
@@ -410,18 +478,19 @@ async function runBoth(){
     let el=(e.target instanceof Element)?e.target:null;
     while(el && !el.classList.contains("tok")) el=el.parentElement;
     if(!el || el.dataset.clickable==="0") return;
-    openPop(e.clientX,e.clientY,{surface:el.dataset.surface||"", lemma:el.dataset.lemma||""});
+    openPop(e.clientX||20,e.clientY||20,{surface:el.dataset.surface||"", lemma:el.dataset.lemma||""});
   });
   document.addEventListener("click",(e)=>{
     if(pop.style.display==="block"){
       if(!pop.contains(e.target) && !e.target.closest(".tok")) closePop();
     }
   });
+  $("#popClose").addEventListener("click",closePop);
   window.addEventListener("keydown",(e)=>{ if((e.ctrlKey||e.metaKey)&&e.key==="Enter"){ e.preventDefault(); runBoth(); } });
   $("#inputBox").addEventListener("toggle",()=>{ if($("#inputBox").open) $("#input").focus(); });
 })();
 
-/* 단축어 연동 */
+/* ===== 단축어 연동 ===== */
 function getQueryText(){
   const sp=new URLSearchParams(location.search);
   let q=sp.get("text"); if(!q) return "";
@@ -436,4 +505,3 @@ function getQueryText(){
 </script>
 </body>
 </html>
-
