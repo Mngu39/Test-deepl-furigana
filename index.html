@@ -61,7 +61,8 @@
 
   /* 헤더: Anki=토글, Learn=링크(바로 이동) – 화살표 제거 */
   .khead{display:flex;align-items:center;gap:8px;font-size:14px;font-weight:700}
-  .khead.btn{cursor:pointer}
+  .khead.toggle{cursor:pointer}
+  .khead{background:transparent;border:0;padding:0;border-radius:0} /* 안전장치 */
   .khead.link{cursor:pointer;text-decoration:none;color:inherit}
   .khead.link:hover{filter:brightness(1.08)}
 
@@ -296,7 +297,7 @@ function makeKanjiBox({ch, kr, cls, descText="", dictHref=""}){
     head.href=dictHref; head.target="_blank"; head.rel="noopener";
   }else{
     head=document.createElement("div");
-    head.className="khead btn";
+    head.className="khead toggle";
   }
   head.textContent = `${ch} · ${kr||""}`;
   box.appendChild(head);
@@ -435,3 +436,4 @@ function getQueryText(){
 </script>
 </body>
 </html>
+
