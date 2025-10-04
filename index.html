@@ -534,7 +534,6 @@ async function runBoth(){
 }
 
 /* 이벤트 */
-let lastTokens=null, rubyOn=true; // (중복 선언 방지: 이 줄이 이미 위에 있으면 삭제하세요)
 $("#runBtn").addEventListener("click", runBoth);
 $("#btnToggleRuby").addEventListener("click", ()=>{
   rubyOn = !rubyOn;
@@ -576,3 +575,4 @@ function getQueryText(){
 </script>
 </body>
 </html>
+
