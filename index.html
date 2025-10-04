@@ -8,9 +8,9 @@
 <style>
   :root{
     --bg:#0b0f14; --card:#11161f; --ink:#e6edf3; --line:#223044; --muted:#9fb0c2; --accent:#5aa9ff;
-    /* ✅ 초록 테마: Anki(아는)=옅은 초록 / Learn(모르는)=선명한 초록 */
+    /* ✅ 초록 테마: 아는 한자(Anki)=옅은 초록 / 모르는 한자(Learn)=선명한 초록(흰 글자) */
     --anki-bg:#112019; --anki-border:#1f3b2d; --anki-ink:#cfe0f2;
-    --learn-bg:#2e7d4f; --learn-border:#3fa567; --learn-ink:#06110b;
+    --learn-bg:#0f7d59; --learn-border:#1cc98a; --learn-ink:#ffffff;
   }
   *{box-sizing:border-box}
   body{margin:0;background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,Segoe UI,Roboto,Noto Sans,Apple SD Gothic Neo,sans-serif}
@@ -57,19 +57,19 @@
   .popMsg{font-size:12px;color:#9fb0c2;margin-top:8px}
   .popActions{display:flex;gap:8px;justify-content:flex-end;margin-top:10px}
 
-  /* ✅ 한자 정보 박스(칩 → 카드로 변경, 클릭시 펼침/접힘) */
+  /* ✅ 한자 정보 리스트 */
   .kanjiList{display:flex;flex-direction:column;gap:8px;margin-top:8px}
   .kbox{border:1px solid var(--line);border-radius:12px;padding:8px 10px}
   .kbox.anki{background:var(--anki-bg);color:var(--anki-ink);border-color:var(--anki-border)}
   .kbox.learn{background:var(--learn-bg);color:var(--learn-ink);border-color:var(--learn-border)}
-  .khead{display:flex;align-items:center;gap:8px;cursor:pointer;font-size:14px;font-weight:700}
-  .khead .caret{margin-left:auto;transition:transform .15s ease}
-  .kbox.open .khead .caret{transform:rotate(90deg)}
+  /* 헤더(Anki=토글 / Learn=링크) */
+  .khead{display:flex;align-items:center;gap:8px;font-size:14px;font-weight:700}
+  .khead.btn{cursor:pointer}
+  .khead.link{cursor:pointer;text-decoration:none;color:inherit}
+  .khead.link:hover{filter:brightness(1.08)}
+  /* 설명 */
   .kdesc{display:none;margin-top:6px;font-size:13px;line-height:1.5;white-space:pre-wrap}
   .kbox.open .kdesc{display:block}
-  .kdesc .dict{display:inline-block;margin-top:6px;padding:4px 8px;border-radius:999px;border:1px solid rgba(255,255,255,.15);text-decoration:none;font-size:12px}
-  .kbox.learn .kdesc .dict{color:#06110b;border-color:#0e3b21;background:#c7efda}
-  .kbox.anki  .kdesc .dict{color:#d3f2de;border-color:#2a5a42;background:#1a2f25}
 </style>
 </head>
 <body>
@@ -110,7 +110,6 @@
   <span id="popSub" class="popSub"></span>
   <div id="popDeepl" class="popTrans"></div>
 
-  <!-- ✅ 한자별 카드(Anki → learn 순) -->
   <div id="popAnki" class="kanjiList" style="display:none"></div>
   <div id="popKo"   class="kanjiList" style="display:none"></div>
 
@@ -279,44 +278,41 @@ function getLemmaReading(lemma){
   }).catch(()=>{ lemmaReadCache.set(lemma,""); return ""; });
 }
 
-/* ===== 팝업: 한자 카드 생성(설명 접기/펼치기) ===== */
+/* ===== 팝업: 한자 카드(Anki=토글 / Learn=바로 링크) ===== */
 const pop=$("#pop"), popLink=$("#popLink"), popSub=$("#popSub"), popDeepl=$("#popDeepl");
 const popAnki=$("#popAnki"), popKo=$("#popKo"), popMsg=$("#popMsg");
 
 function buildNaverSearchUrl(q){ return "https://ja.dict.naver.com/#/search?query="+encodeURIComponent(q||""); }
 
-/* ✅ 한자 카드: 한자·훈음 헤더(클릭=토글) + 설명(선택) + 사전링크(옵션) */
 function makeKanjiBox({ch, kr, cls, descText="", dictHref=""}){
   const box=document.createElement("div");
   box.className=`kbox ${cls}`;
 
-  const head=document.createElement("div");
-  head.className="khead";
-  head.innerHTML = `<span>${escapeHtml(ch)} · ${escapeHtml(kr||"")}</span><span class="caret">▶</span>`;
+  // 헤더: Anki=div(토글), Learn=a(바로 이동)
+  let head;
+  if (cls==="learn" && dictHref){
+    head=document.createElement("a");
+    head.className="khead link";
+    head.href=dictHref; head.target="_blank"; head.rel="noopener";
+  }else{
+    head=document.createElement("div");
+    head.className="khead btn";
+  }
+  head.innerHTML = `<span>${escapeHtml(ch)} · ${escapeHtml(kr||"")}</span>`;
   box.appendChild(head);
 
-  const desc=document.createElement("div");
-  desc.className="kdesc";
-  if (descText) {
-    desc.textContent = descText;       // 이미 줄바꿈 보존 형태
+  // 설명(Anki에서만 사용)
+  if (cls==="anki"){
+    const desc=document.createElement("div");
+    desc.className="kdesc";
+    if (descText) desc.textContent = descText;
+    if (descText){ box.appendChild(desc); }
+    head.addEventListener("click", ()=>{ box.classList.toggle("open"); });
   }
-  if (dictHref){
-    const a=document.createElement("a");
-    a.className="dict"; a.href=dictHref; a.target="_blank"; a.rel="noopener";
-    a.textContent="사전 열기";
-    if (descText) desc.appendChild(document.createElement("br"));
-    desc.appendChild(a);
-  }
-  if (descText || dictHref) box.appendChild(desc);
-
-  head.addEventListener("click", ()=>{
-    box.classList.toggle("open");
-  });
 
   return box;
 }
 
-/* 한자 박스 채우기(간단: 문자별 Anki → 없으면 fallback) */
 async function fillKanjiBoxes(lemma){
   popAnki.style.display="none"; popAnki.innerHTML="";
   popKo.style.display="none";   popKo.innerHTML="";
@@ -343,7 +339,7 @@ async function fillKanjiBoxes(lemma){
       const hun=kRec["훈"]||"", eum=kRec["음"]||"";
       let kr=""; if(hun) kr+=hun; if(hun&&eum) kr+=SEP_WIDE; if(eum) kr+=eum;
       const href="https://hanja.dict.naver.com/#/search?query="+encodeURIComponent(ch);
-      popKo.appendChild(makeKanjiBox({ch, kr, cls:"learn", descText:"", dictHref:href}));
+      popKo.appendChild(makeKanjiBox({ch, kr, cls:"learn", dictHref:href}));
       kCount++; continue;
     }
   }
