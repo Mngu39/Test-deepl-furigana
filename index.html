@@ -8,7 +8,7 @@
   <style>
     :root {
       --bg:#0b0f14; --card:#11161f; --ink:#e6edf3; --line:#223044; --muted:#9fb0c2; --accent:#5aa9ff;
-      /* 팝업 칩 색상: Anki=옅은, Learn(미보유)=짙은 */
+      /* 팝업 칩 색상: Anki(옅은) / 학습대상(짙은) */
       --anki-bg:#234031; --anki-border:#2e7d4f; --anki-ink:#d3f2de;
       --learn-bg:#122038; --learn-border:#2d80e4; --learn-ink:#cfe0f2;
     }
@@ -31,7 +31,7 @@
     /* 루비 토글: 줄간격 유지(숨김만) */
     #rubyOut.ruby-off ruby rt{opacity:0}
 
-    /* 원문 토큰: 색상 강조 제거(깔끔하게) */
+    /* 원문 토큰: 색 강조 없음(깔끔) */
     .tok{padding:1px 2px;border-radius:6px;cursor:pointer}
     .tok:hover{background:#1a2436}
     .tok[data-clickable="0"]{cursor:default}
@@ -71,7 +71,6 @@
 <body>
 <header><h1>Furigana + 번역</h1></header>
 <main>
-
   <!-- 입력(접힘) -->
   <section class="card">
     <details id="inputBox">
@@ -151,13 +150,11 @@ function htmlToPlainWithBreaks(html){
   const text = tmp.textContent || tmp.innerText || "";
   return text.replace(/\r\n/g,"\n").replace(/\n{3,}/g,"\n\n").trim();
 }
-
 function stripHtml(s){
   const tmp = document.createElement("div");
   tmp.innerHTML = String(s||"");
   return (tmp.textContent || tmp.innerText || "").trim();
 }
-
 function withTimeout(run, ms=45000, label="요청"){
   const ctrl=new AbortController(); const t=setTimeout(()=>ctrl.abort(), ms);
   return Promise.race([
@@ -287,9 +284,11 @@ async function ensureDbs(){
   }
 }
 
-/* ===== 상태 ===== */
-let lastTokens = null;
-let rubyOn = true;
+/* ===== 상태(중복 선언 방지: 전역 객체로 관리) ===== */
+const APP = (function(){
+  if (!window.__APP__) window.__APP__ = { lastTokens:null, rubyOn:true };
+  return window.__APP__;
+})();
 
 /* ===== ruby DOM ===== */
 function buildRubyTokens(tokens){
@@ -309,11 +308,11 @@ function buildRubyTokens(tokens){
   }).join("");
 }
 function renderText(){
-  if(!lastTokens) return;
-  $("#rubyOut").innerHTML = buildRubyTokens(lastTokens);
-  $("#rubyOut").classList.toggle("ruby-off", !rubyOn);
-  $("#btnToggleRuby").textContent = rubyOn ? "루비 끄기" : "루비 켜기";
-  // 원문에는 색 강조 없음(요청사항)
+  if(!APP.lastTokens) return;
+  $("#rubyOut").innerHTML = buildRubyTokens(APP.lastTokens);
+  $("#rubyOut").classList.toggle("ruby-off", !APP.rubyOn);
+  $("#btnToggleRuby").textContent = APP.rubyOn ? "루비 끄기" : "루비 켜기";
+  // 원문에는 색 강조 없음
 }
 
 /* ===== lemma 읽기 캐시 ===== */
@@ -490,9 +489,8 @@ function openPop(x, y, payload){
     const fb = await renderKoChipsForLemma(lemma, had ? seen : new Set());
 
     if (!had && (!fb.shown)){
-      // 왜 없는지 사용자에게 즉시 표시
       let why = "일치하는 한자 항목이 없습니다.";
-      if (fb.reason === "KANJI_DB_NULL") why = "로컬 사전 파일을 불러오지 못했습니다. (경로/배포 확인)";
+      if (fb.reason === "KANJI_DB_NULL") why = "로컬 사전 파일을 불러오지 못했습니다. (kanji_ko_attr_irreg.min.json 경로/배포 확인)";
       popMsg.textContent = why;
       popMsg.style.display = "block";
     }
@@ -505,12 +503,6 @@ function openPop(x, y, payload){
   pop.style.display = "block";
 }
 function closePop(){ pop.style.display="none"; }
-$("#popClose").addEventListener("click", closePop);
-document.addEventListener("click", (e)=>{
-  if(pop.style.display==="block"){
-    if(!pop.contains(e.target) && !e.target.closest(".tok")) closePop();
-  }
-});
 
 /* ===== 실행 ===== */
 async function runBoth(){
@@ -523,7 +515,7 @@ async function runBoth(){
   $("#transOut").innerHTML = "<em style='color:#9fb0c2'>번역 중…</em>";
   try{
     const [furi, tr] = await Promise.all([callFurigana(text), callDeepL(text, "JA", "KO")]);
-    lastTokens = furi.tokens || [];
+    APP.lastTokens = furi.tokens || [];
     renderText(); // rt 토글 방식이라 줄간격 유지
     const t = tr.translation || tr.result || tr.data || "";
     $("#transOut").innerHTML = t ? escapeHtml(t).replace(/\n/g,"<br>") : "<em style='color:#9fb0c2'>결과 없음</em>";
@@ -533,28 +525,38 @@ async function runBoth(){
   }
 }
 
-/* 이벤트 */
-$("#runBtn").addEventListener("click", runBoth);
-$("#btnToggleRuby").addEventListener("click", ()=>{
-  rubyOn = !rubyOn;
-  $("#rubyOut").classList.toggle("ruby-off", !rubyOn);
-  $("#btnToggleRuby").textContent = rubyOn ? "루비 끄기" : "루비 켜기";
-});
-$("#rubyOut").addEventListener("click", (e)=>{
-  let el = (e.target instanceof Element) ? e.target : null;
-  while(el && !el.classList.contains("tok")) el = el.parentElement;
-  if(!el || el.dataset.clickable === "0") return;
-  openPop(e.clientX, e.clientY, {
-    surface: el.dataset.surface || "",
-    lemma:   el.dataset.lemma   || ""
+/* ===== 이벤트 바인딩(중복 안전) ===== */
+(function bindOnce(){
+  if (window.__BOUND__) return;  // 중복 로드 방지
+  window.__BOUND__ = true;
+
+  $("#runBtn").addEventListener("click", runBoth);
+  $("#btnToggleRuby").addEventListener("click", ()=>{
+    APP.rubyOn = !APP.rubyOn;
+    $("#rubyOut").classList.toggle("ruby-off", !APP.rubyOn);
+    $("#btnToggleRuby").textContent = APP.rubyOn ? "루비 끄기" : "루비 켜기";
   });
-});
-window.addEventListener("keydown", (e)=>{
-  if((e.ctrlKey||e.metaKey) && e.key==="Enter"){ e.preventDefault(); runBoth(); }
-});
-$("#inputBox").addEventListener("toggle", ()=>{
-  if($("#inputBox").open){ $("#input").focus(); }
-});
+  $("#rubyOut").addEventListener("click", (e)=>{
+    let el = (e.target instanceof Element) ? e.target : null;
+    while(el && !el.classList.contains("tok")) el = el.parentElement;
+    if(!el || el.dataset.clickable === "0") return;
+    openPop(e.clientX, e.clientY, {
+      surface: el.dataset.surface || "",
+      lemma:   el.dataset.lemma   || ""
+    });
+  });
+  document.addEventListener("click", (e)=>{
+    if(pop.style.display==="block"){
+      if(!pop.contains(e.target) && !e.target.closest(".tok")) closePop();
+    }
+  });
+  window.addEventListener("keydown", (e)=>{
+    if((e.ctrlKey||e.metaKey) && e.key==="Enter"){ e.preventDefault(); runBoth(); }
+  });
+  $("#inputBox").addEventListener("toggle", ()=>{
+    if($("#inputBox").open){ $("#input").focus(); }
+  });
+})();
 
 /* ===== 단축어 연동: ?text=...&auto=1 ===== */
 function getQueryText(){
@@ -575,4 +577,3 @@ function getQueryText(){
 </script>
 </body>
 </html>
-
