@@ -1,12 +1,12 @@
 <!doctype html>
-<html lang="ko"><!doctype html>
 <html lang="ko">
 <head>
   <meta charset="utf-8" />
   <title>Furigana + 번역</title>
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <style>
-    :root { --bg:#0b0f14; --card:#11161f; --ink:#e6edf3; --line:#223044; --muted:#9fb0c2; --accent:#5aa9ff; }
+    :root { --bg:#0b0f14; --card:#11161f; --ink:#e6edf3; --line:#223044; --muted:#9fb0c2; --accent:#5aa9ff;
+            --anki:#2a5138; --anki-border:#2e7d4f; }
     *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,Segoe UI,Roboto,Noto Sans,Apple SD Gothic Neo,sans-serif}
     header{padding:16px 20px;border-bottom:1px solid var(--line)}
     h1{margin:0;font-size:16px;font-weight:600}
@@ -19,13 +19,18 @@
     .btn.primary{background:var(--accent);color:#06111e;border-color:#2d80e4;font-weight:600}
     .error{color:#ffb3b3}
     textarea{width:100%;min-height:120px;background:#0e141c;color:#e6edf3;border:1px solid var(--line);border-radius:10px;padding:12px;resize:vertical;line-height:1.5}
+
     ruby{ruby-position:over}
     ruby rt{font-size:.8em;color:#b9c8d8;opacity:1;transition:opacity .15s ease}
-    #rubyOut.ruby-off ruby rt{opacity:0}     /* 루비 토글: 줄간격 유지 */
+    #rubyOut.ruby-off ruby rt{opacity:0}
+
     .tok{padding:1px 2px;border-radius:6px;cursor:pointer}
     .tok:hover{background:#1a2436}
     .tok[data-clickable="0"]{cursor:default}
-    .tok ruby, .tok rb, .tok rt { pointer-events:none; } /* 루비 내부 클릭 버그 방지 */
+    .tok ruby, .tok rb, .tok rt { pointer-events:none; }
+
+    .tok.anki-hit{ background:rgba(46,125,79,.2); outline:1px solid rgba(46,125,79,.35); }
+
     .pane{height:38vh; min-height:28vh; max-height:60vh; overflow:auto; background:#0e141c; border:1px solid var(--line); border-radius:10px; padding:12px; white-space:pre-wrap}
     @media (max-height:760px){ .pane{height:34vh} }
     details summary{list-style:none; cursor:pointer; display:flex; align-items:center; gap:8px; user-select:none}
@@ -34,40 +39,26 @@
     details[open] .chev{transform:rotate(90deg)}
     .hint{margin-left:auto; color:#9fb0c2; font-size:12px}
 
-    /* 팝업 */
-    #pop{position:fixed;z-index:9999;max-width:360px;display:none;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px}
+    #pop{position:fixed;z-index:9999;max-width:420px;display:none;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px}
     .popTitle{font-size:22px;font-weight:800;line-height:1.2;display:inline-block;color:#e6edf3;text-decoration:none}
     .popTitle rt{font-size:.7em}
     .popSub{font-size:12px;color:#9fb0c2;margin-left:6px}
     .popTrans{font-size:15px;color:#cfe0f2;margin-top:8px;word-break:break-word}
     .popActions{display:flex;gap:8px;justify-content:flex-end;margin-top:10px}
 
-    /* 🔻 한자 칩: 한 줄에 하나씩(세로), 훈/음 구분 가독 */
-    .kochips{
-      display:flex;
-      flex-direction:column;   /* 세로 배치 */
-      gap:8px;                 /* 줄 간 간격 */
-      margin-top:8px;
-    }
-    .kochip{
-      display:block;           /* 줄바꿈 강제 */
-      border:1px solid var(--line);
-      background:#182233;
-      color:#cfe0f2;
-      border-radius:999px;
-      padding:6px 10px;
-      font-size:12px;
-      text-decoration:none;
-      width:max-content;       /* 텍스트 길이만큼 */
-    }
-    .kochip:hover{ background:#20304a }
+    .chips{ display:flex; flex-direction:column; gap:8px; margin-top:8px }
+    .chip{ display:block; width:max-content; border:1px solid var(--line); border-radius:999px; padding:6px 10px; font-size:12px; text-decoration:none }
+    .chip:hover{ filter:brightness(1.08) }
+    .chip.db{ background:#182233; color:#cfe0f2; }
+    .chip.anki{ background:var(--anki); color:#d3f2de; border-color:var(--anki-border); cursor:pointer }
+
+    .ankiDesc{ margin-top:8px; font-size:13px; color:#cfe0f2; background:#13211a; border:1px solid #244f37; border-radius:8px; padding:8px; display:none; white-space:pre-wrap }
   </style>
 </head>
 <body>
 <header><h1>Furigana + 번역</h1></header>
 <main>
 
-  <!-- 입력(접힘) -->
   <section class="card">
     <details id="inputBox">
       <summary>
@@ -84,7 +75,6 @@
     </details>
   </section>
 
-  <!-- 원문(루비 토글, 독립 스크롤) -->
   <section class="card">
     <div class="label" style="margin-bottom:8px">원문</div>
     <div id="rubyOut" class="pane" aria-live="polite"></div>
@@ -93,31 +83,34 @@
     </div>
   </section>
 
-  <!-- 번역(독립 스크롤) -->
   <section class="card">
     <div class="label" style="margin-bottom:8px">번역</div>
     <div id="transOut" class="pane" aria-live="polite"></div>
   </section>
 </main>
 
-<!-- 단어 팝업 -->
 <div id="pop">
-  <!-- 헤더: 기본형(큰 글씨, "기본형의 읽기"를 rt로), (선택 글자) 작게 -->
   <a id="popLink" class="popTitle" href="#" target="_blank" rel="noopener"></a>
   <span id="popSub" class="popSub"></span>
-  <!-- 번역 텍스트 -->
   <div id="popDeepl" class="popTrans"></div>
-  <!-- 한자 훈·음 칩 -->
-  <div id="popKo" class="kochips" style="display:none"></div>
+
+  <div id="popAnki" class="chips" style="display:none"></div>
+  <div id="ankiDesc" class="ankiDesc"></div>
+
+  <div id="popKo" class="chips" style="display:none"></div>
+
   <div class="popActions"><button class="btn" id="popClose" type="button">닫기</button></div>
 </div>
 
 <script>
-/* ===== 고정 엔드포인트 ===== */
+/* ===== 엔드포인트 ===== */
 const FURIGANA_URL = "https://furigana-api-345684237835.asia-northeast3.run.app/furigana";
 const DEEPL_URL    = "https://solitary-mud-8caf.rlaalsrbr.workers.dev/translate";
-/* 로컬 한자-한국어 DB (index.html과 같은 폴더) */
-const KANJI_DB_URL = "./kanji_ko_attr_irreg.min.json";
+
+/* ===== 로컬 DB 경로 =====
+   CrowdAnki 폴더/파일명을 GitHub Pages에 그대로 올리고 아래 경로만 맞추면 됩니다. */
+const CROWDANKI_URL = "./일본어_한자_암기박사/deck.json";   // ← 이번 내보내기 폴더
+const KANJI_DB_URL  = "./kanji_ko_attr_irreg.min.json";     // fallback 사전
 
 /* ===== 유틸 ===== */
 const $ = (s)=>document.querySelector(s);
@@ -125,6 +118,7 @@ function escapeHtml(s){ const d=document.createElement("div"); d.innerText=s; re
 function escapeAttr(s){ return String(s).replace(/&/g,"&amp;").replace(/"/g,"&quot;").replace(/</g,"&lt;"); }
 function kata2hira(s){ return s.replace(/[\u30a1-\u30f6]/g, ch=>String.fromCharCode(ch.charCodeAt(0)-0x60)); }
 function hasKanji(s){ return /[\u4E00-\u9FFF]/.test(s); }
+function stripHtml(s){ return String(s||"").replace(/<[^>]*>/g,""); }
 function withTimeout(run, ms=45000, label="요청"){
   const ctrl=new AbortController(); const t=setTimeout(()=>ctrl.abort(), ms);
   return Promise.race([
@@ -132,8 +126,6 @@ function withTimeout(run, ms=45000, label="요청"){
     (async()=>{ await new Promise(r=>setTimeout(r, ms+50)); throw new Error(label+" 타임아웃("+ms+"ms)"); })()
   ]).finally(()=>clearTimeout(t));
 }
-
-/* 넓은 공백(EM SPACE ×2) — 훈/음 사이 구분용 */
 const SEP_WIDE = " ";
 
 /* ===== API ===== */
@@ -150,21 +142,117 @@ async function callDeepL(text, src="JA", tgt="KO"){
   return withTimeout(fetcher, 45000, "DeepL");
 }
 
-/* ===== 로컬 한자 DB ===== */
-let KANJI_DB = null;
-async function loadKanjiDB(){
-  if (KANJI_DB) return KANJI_DB;
-  const res = await fetch(KANJI_DB_URL, { cache:"force-cache" });
-  if (!res.ok) throw new Error("kanji DB load " + res.status);
-  KANJI_DB = await res.json();
-  return KANJI_DB;
+/* ===== DB 로더 ===== */
+let KANJI_DB = null;  // fallback
+let ANKI_DB  = null;  // CrowdAnki → per-char DB
+
+async function loadJsonGraceful(url){
+  try{
+    const res = await fetch(url, { cache:"force-cache" });
+    if(!res.ok) throw new Error(String(res.status));
+    return await res.json();
+  }catch(_){ return null; }
+}
+
+/* CrowdAnki deck.json → per-char DB 빌드
+   모델 필드: [Sequence, Front, Back, Explain]
+   - Front  : 한자
+   - Back   : "훈 음" (예: "사람 인")
+   - Explain: 설명문 (HTML 포함 가능) */
+function buildDbFromCrowdAnki(deck){
+  const modelMap = new Map();
+  const nms = deck.note_models || deck["note_models"] || [];
+  for (const m of nms){
+    const uuid = m["crowdanki_uuid"] || m["id"] || m["uuid"] || m["note_model_uuid"];
+    const flds = (m.flds || m["flds"] || []).map(o => o && (o.name || o["name"] || ""));
+    if (uuid && flds.length) modelMap.set(uuid, flds);
+  }
+
+  const db = {}; // { "漢": {훈:"", 음:"", 설명:""} }
+
+  // 내부 탐색기로 deck 트리 어디에 있든 notes를 긁어옴
+  const notes = [];
+  (function walk(x){
+    if (!x) return;
+    if (Array.isArray(x)){ x.forEach(walk); return; }
+    if (typeof x === "object"){
+      if (Array.isArray(x.notes)) notes.push(...x.notes);
+      for (const k in x) walk(x[k]);
+    }
+  })(deck);
+
+  // "훈 음" → {훈, 음}로 분리
+  function splitHunEum(backText){
+    const s = stripHtml(backText).trim();
+    if (!s) return {hun:"", eum:""};
+    const parts = s.split(/\s+/);
+    if (parts.length >= 2){
+      const eum = parts[parts.length-1];
+      const hun = parts.slice(0, -1).join(" ");
+      return {hun, eum};
+    }
+    // 한 토큰(예: '인'만)인 경우: 음으로 두고 훈 비우기
+    if (parts.length === 1){
+      return {hun:"", eum:parts[0]};
+    }
+    return {hun:"", eum:""};
+  }
+
+  for (const note of notes){
+    const uuid = note["note_model_uuid"];
+    const names = modelMap.get(uuid) || [];
+    const vals  = note["fields"] || note["flds"] || [];
+
+    // 기대 이름 매칭
+    const iSeq = names.findIndex(n=>/^sequence$/i.test(n));
+    const iFront = names.findIndex(n=>/^front$/i.test(n));
+    const iBack  = names.findIndex(n=>/^back$/i.test(n));
+    const iExpl  = names.findIndex(n=>/^explain$/i.test(n));
+
+    const kanji = stripHtml(iFront>=0 ? vals[iFront] : "");
+    const back  = iBack>=0  ? vals[iBack]  : "";
+    const memo  = iExpl>=0  ? vals[iExpl]  : "";
+
+    const {hun, eum} = splitHunEum(back);
+
+    if(!kanji) continue;
+    for (const ch of Array.from(kanji)){
+      if (!/\p{Script=Han}/u.test(ch)) continue;
+      const rec = db[ch] || {"훈":"", "음":"", "설명":""};
+
+      function merge(oldVal, newVal){
+        const arr = (oldVal?oldVal.split(","):[]).map(s=>s.trim()).filter(Boolean);
+        for (const t of (newVal?newVal.split(","):[])){
+          const s = t.trim(); if (s && !arr.includes(s)) arr.push(s);
+        }
+        return arr.join(", ");
+      }
+
+      if(hun) rec["훈"] = merge(rec["훈"], hun);
+      if(eum) rec["음"] = merge(rec["음"], eum);
+      const txt = stripHtml(memo||"");
+      if (txt && txt.length > (rec["설명"]||"").length) rec["설명"] = txt;
+
+      db[ch] = rec;
+    }
+  }
+
+  return db;
+}
+
+async function ensureDbs(){
+  if (!KANJI_DB) KANJI_DB = await loadJsonGraceful(KANJI_DB_URL);
+  if (ANKI_DB === null){  // 한 번만 빌드
+    const deck = await loadJsonGraceful(CROWDANKI_URL);
+    ANKI_DB = deck ? buildDbFromCrowdAnki(deck) : null;
+  }
 }
 
 /* ===== 상태 ===== */
 let lastTokens=null;
 let rubyOn=true;
 
-/* ===== ruby DOM(항상 생성: rt를 CSS로 숨김) ===== */
+/* ===== ruby DOM ===== */
 function buildRubyTokens(tokens){
   return (tokens||[]).map((t, idx)=>{
     const s=String(t.surface||"");
@@ -181,11 +269,24 @@ function buildRubyTokens(tokens){
          + ' data-reading="'+escapeAttr(rt)+'">'+ inner +'</span>';
   }).join("");
 }
+function markAnkiHits(){
+  if(!ANKI_DB || !lastTokens) return;
+  const wrap = $("#rubyOut");
+  wrap.querySelectorAll(".tok").forEach(el=>{
+    const lemma = el.dataset.lemma || el.dataset.surface || "";
+    let hit=false;
+    for(const ch of Array.from(lemma)){
+      if(/\p{Script=Han}/u.test(ch) && ANKI_DB[ch]) { hit=true; break; }
+    }
+    el.classList.toggle("anki-hit", !!hit);
+  });
+}
 function renderText(){
   if(!lastTokens) return;
   $("#rubyOut").innerHTML = buildRubyTokens(lastTokens);
   $("#rubyOut").classList.toggle("ruby-off", !rubyOn);
   $("#btnToggleRuby").textContent = rubyOn ? "루비 끄기" : "루비 켜기";
+  ensureDbs().then(()=>markAnkiHits());
 }
 
 /* ===== lemma 읽기 캐시 ===== */
@@ -212,65 +313,120 @@ const pop=$("#pop");
 const popLink=$("#popLink");
 const popSub=$("#popSub");
 const popDeepl=$("#popDeepl");
+const popAnki=$("#popAnki");
+const ankiDesc=$("#ankiDesc");
 const popKo=$("#popKo");
 
 function buildNaverSearchUrl(q){
   return "https://ja.dict.naver.com/#/search?query=" + encodeURIComponent(q || "");
 }
+function makeChip(label, href, cls="db", onClick=null){
+  const a = document.createElement(onClick ? "button" : "a");
+  a.className = `chip ${cls}`;
+  if(onClick){
+    a.type = "button";
+    a.addEventListener("click", onClick);
+  }else{
+    a.href = href || "#";
+    a.target = "_blank";
+    a.rel = "noopener";
+  }
+  a.innerText = label;
+  return a;
+}
 
-async function renderKoChipsForLemma(lemma){
+async function renderAnkiChipsForLemma(lemma){
+  popAnki.style.display="none";
+  popAnki.innerHTML="";
+  ankiDesc.style.display="none";
+  ankiDesc.textContent="";
+
+  if(!ANKI_DB) return {had:false, seen:new Set()};
+
+  const seen = new Set();
+  const chips = [];
+
+  for (const ch of Array.from(lemma)){
+    if (!/[\u4E00-\u9FFF]/.test(ch)) continue;
+    if (seen.has(ch)) continue;
+    seen.add(ch);
+
+    const rec = ANKI_DB[ch];  // {음:"", 훈:"", 설명:""} 또는 undefined
+    if (!rec) continue;
+
+    const hun = rec["훈"] || "";
+    const eum = rec["음"] || "";
+    let kr = "";
+    if (hun) kr += hun;
+    if (hun && eum) kr += SEP_WIDE;
+    if (eum) kr += eum;
+
+    const label = kr ? `${ch} · ${kr}` : ch;
+    const memo  = rec["설명"] || "";
+
+    const chip = makeChip(label, null, "anki", ()=>{
+      ankiDesc.textContent = memo ? `${ch} — ${memo}` : `${ch} — (설명 없음)`;
+      ankiDesc.style.display="block";
+    });
+    chips.push(chip);
+  }
+
+  if (chips.length){
+    chips.forEach(c=>popAnki.appendChild(c));
+    popAnki.style.display = "flex";
+    return {had:true, seen:seen};
+  }
+  return {had:false, seen:new Set()};
+}
+
+async function renderKoChipsForLemma(lemma, skipSet){
   popKo.style.display="none";
   popKo.innerHTML="";
-  try{
-    const db = await loadKanjiDB();
-    const seen = new Set();
-    const chips = [];
+  const db = KANJI_DB;
+  if(!db) return false;
 
-    for (const ch of Array.from(lemma)){
-      if (!/[\u4E00-\u9FFF]/.test(ch)) continue;   // 한자만
-      if (seen.has(ch)) continue;
-      seen.add(ch);
+  const seen = new Set(skipSet || []);
+  const chips = [];
 
-      const rec = db[ch];  // {음:"", 훈:""} 또는 undefined
-      if (!rec) continue;
+  for (const ch of Array.from(lemma)){
+    if (!/[\u4E00-\u9FFF]/.test(ch)) continue;
+    if (seen.has(ch)) continue;
+    seen.add(ch);
 
-      const hun = rec["훈"] || "";
-      const eum = rec["음"] || "";
+    const rec = db[ch];  // {음:"", 훈:""} 또는 undefined
+    if (!rec) continue;
 
-      // 훈 먼저, 넓은 공백 후 음
-      let kr = "";
-      if (hun) kr += hun;
-      if (hun && eum) kr += SEP_WIDE;
-      if (eum) kr += eum;
+    const hun = rec["훈"] || "";
+    const eum = rec["음"] || "";
 
-      const label = kr ? `${ch} · ${kr}` : ch;
+    let kr = "";
+    if (hun) kr += hun;
+    if (hun && eum) kr += SEP_WIDE;
+    if (eum) kr += eum;
 
-      const href  = "https://hanja.dict.naver.com/#/search?query=" + encodeURIComponent(ch);
-      chips.push(
-        '<a class="kochip" href="'+escapeAttr(href)+'" target="_blank" rel="noopener">'
-        + escapeHtml(label) + '</a>'
-      );
-    }
+    const label = kr ? `${ch} · ${kr}` : ch;
+    const href  = "https://hanja.dict.naver.com/#/search?query=" + encodeURIComponent(ch);
 
-    if (chips.length){
-      popKo.innerHTML = chips.join("");
-      popKo.style.display = "flex";   /* 세로 리스트 보이기 */
-    }
-  }catch(e){
-    /* 조용히 무시 */
+    const chip = makeChip(label, href, "db");
+    chips.push(chip);
   }
+
+  if (chips.length){
+    chips.forEach(c=>popKo.appendChild(c));
+    popKo.style.display = "flex";
+    return true;
+  }
+  return false;
 }
 
 function openPop(x, y, payload){
   const surface = payload.surface || "";
   const lemma   = payload.lemma   || surface;
 
-  // 헤더 링크: 네이버 검색 페이지
   popLink.innerHTML = escapeHtml(lemma);
   popLink.href = buildNaverSearchUrl(lemma);
   popSub.textContent = (surface && surface!==lemma) ? "(" + surface + ")" : "";
 
-  // lemma 읽기(rt)로 헤더를 ruby로 업데이트
   if(hasKanji(lemma)){
     getLemmaReading(lemma).then(rt=>{
       popLink.innerHTML = rt
@@ -279,7 +435,6 @@ function openPop(x, y, payload){
     });
   }
 
-  // 번역(lemma 기준)
   popDeepl.textContent="불러오는 중…";
   callDeepL(lemma, "JA", "KO").then(res=>{
     const t = res.translation || res.result || res.data || "";
@@ -288,13 +443,17 @@ function openPop(x, y, payload){
     popDeepl.textContent = "에러: " + (e && e.message ? e.message : String(e));
   });
 
-  // 한자 훈·음 칩 (로컬 DB)
-  renderKoChipsForLemma(lemma);
+  (async ()=>{
+    await ensureDbs();
+    const {had, seen} = await renderAnkiChipsForLemma(lemma);
+    if(KANJI_DB){
+      await renderKoChipsForLemma(lemma, had ? seen : new Set());
+    }
+  })();
 
-  // 위치 및 표시
   const pad=8, vw=window.innerWidth, vh=window.innerHeight;
-  pop.style.left = Math.min(x+pad, vw-380) + "px";
-  pop.style.top  = Math.min(y+pad, vh-260) + "px";
+  pop.style.left = Math.min(x+pad, vw-440) + "px";
+  pop.style.top  = Math.min(y+pad, vh-320) + "px";
   pop.style.display = "block";
 }
 function closePop(){ pop.style.display="none"; }
@@ -306,376 +465,17 @@ document.addEventListener("click", (e)=>{
 });
 
 /* ===== 실행 ===== */
-async function runBoth(){
-  const text = $("#input").value.trim();
-  if(!text){
-    const box=$("#inputBox"); if(!box.open) box.open=true;
-    $("#input").focus(); return;
-  }
-  $("#rubyOut").innerHTML  = "<em style='color:#9fb0c2'>생성 중…</em>";
-  $("#transOut").innerHTML = "<em style='color:#9fb0c2'>번역 중…</em>";
-  try{
-    const [furi, tr] = await Promise.all([callFurigana(text), callDeepL(text, "JA", "KO")]);
-    lastTokens = furi.tokens || [];
-    renderText(); // rt 토글 방식이라 줄간격 유지
-    const t = tr.translation || tr.result || tr.data || "";
-    $("#transOut").innerHTML = t ? escapeHtml(t).replace(/\n/g,"<br>") : "<em style='color:#9fb0c2'>결과 없음</em>";
-  }catch(e){
-    $("#rubyOut").innerHTML = '<span class="error">에러(후리가나): '+escapeHtml(e && e.message ? e.message : String(e))+'</span>';
-    $("#transOut").innerHTML = "";
-  }
-}
-
-/* 이벤트 바인딩 */
-$("#runBtn").addEventListener("click", runBoth);
-$("#btnToggleRuby").addEventListener("click", ()=>{
-  rubyOn = !rubyOn;
-  $("#rubyOut").classList.toggle("ruby-off", !rubyOn);
-  $("#btnToggleRuby").textContent = rubyOn ? "루비 끄기" : "루비 켜기";
-});
-$("#rubyOut").addEventListener("click", (e)=>{
-  let el = (e.target instanceof Element) ? e.target : null;
-  while(el && !el.classList.contains("tok")) el = el.parentElement;
-  if(!el || el.dataset.clickable === "0") return;
-  openPop(e.clientX, e.clientY, {
-    surface: el.dataset.surface || "",
-    lemma:   el.dataset.lemma   || ""
-  });
-});
-window.addEventListener("keydown", (e)=>{
-  if((e.ctrlKey||e.metaKey) && e.key==="Enter"){ e.preventDefault(); runBoth(); }
-});
-
-/* details 열릴 때 포커스 */
-$("#inputBox").addEventListener("toggle", ()=>{
-  if($("#inputBox").open){ $("#input").focus(); }
-});
-
-/* ===== 단축어 연동: ?text=...&auto=1 (이중 인코딩 복원 포함) ===== */
-function getQueryText(){
-  const sp=new URLSearchParams(location.search);
-  let q = sp.get("text");
-  if(!q) return "";
-  try{ q = decodeURIComponent(q); }catch(_){}
-  try{ q = decodeURIComponent(q); }catch(_){}
-  return q;
-}
-(function initFromQuery(){
-  const qText = getQueryText();
-  if(qText){
-    $("#input").value = qText;
-    if (new URLSearchParams(location.search).get("auto")==="1") { runBoth(); }
-  }
-})();
-</script>
-</body>
-</html>
-
-<head>
-  <meta charset="utf-8" />
-  <title>Furigana + 번역</title>
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <style>
-    :root { --bg:#0b0f14; --card:#11161f; --ink:#e6edf3; --line:#223044; --muted:#9fb0c2; --accent:#5aa9ff; }
-    *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,Segoe UI,Roboto,Noto Sans,Apple SD Gothic Neo,sans-serif}
-    header{padding:16px 20px;border-bottom:1px solid var(--line)}
-    h1{margin:0;font-size:16px;font-weight:600}
-    main{max-width:1100px;margin:0 auto;padding:20px}
-    .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:14px}
-    .label{font-size:13px;color:var(--muted);margin-bottom:8px}
-    .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
-    .btn{background:#182233;color:var(--ink);border:1px solid var(--line);padding:10px 14px;border-radius:10px;cursor:pointer}
-    .btn:hover{background:#1e2a3f}
-    .btn.primary{background:var(--accent);color:#06111e;border-color:#2d80e4;font-weight:600}
-    .error{color:#ffb3b3}
-    textarea{width:100%;min-height:120px;background:#0e141c;color:#e6edf3;border:1px solid var(--line);border-radius:10px;padding:12px;resize:vertical;line-height:1.5}
-    ruby{ruby-position:over}
-    ruby rt{font-size:.8em;color:#b9c8d8;opacity:1;transition:opacity .15s ease}
-    #rubyOut.ruby-off ruby rt{opacity:0}     /* 루비 토글: 줄간격 유지 */
-    .tok{padding:1px 2px;border-radius:6px;cursor:pointer}
-    .tok:hover{background:#1a2436}
-    .tok[data-clickable="0"]{cursor:default}
-    .tok ruby, .tok rb, .tok rt { pointer-events:none; } /* 루비 내부 클릭 버그 방지 */
-    .pane{height:38vh; min-height:28vh; max-height:60vh; overflow:auto; background:#0e141c; border:1px solid var(--line); border-radius:10px; padding:12px; white-space:pre-wrap}
-    @media (max-height:760px){ .pane{height:34vh} }
-    details summary{list-style:none; cursor:pointer; display:flex; align-items:center; gap:8px; user-select:none}
-    details summary::-webkit-details-marker{display:none}
-    .chev{transition:transform .2s ease}
-    details[open] .chev{transform:rotate(90deg)}
-    .hint{margin-left:auto; color:#9fb0c2; font-size:12px}
-
-    /* 팝업 */
-    #pop{position:fixed;z-index:9999;max-width:360px;display:none;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px}
-    .popTitle{font-size:22px;font-weight:800;line-height:1.2;display:inline-block;color:#e6edf3;text-decoration:none}
-    .popTitle rt{font-size:.7em}
-    .popSub{font-size:12px;color:#9fb0c2;margin-left:6px}
-    .popTrans{font-size:15px;color:#cfe0f2;margin-top:8px;word-break:break-word}
-    .popActions{display:flex;gap:8px;justify-content:flex-end;margin-top:10px}
-
-    /* 🔻 한자 칩: 한 줄에 하나씩(세로), 훈/음 구분 가독 */
-    .kochips{
-      display:flex;
-      flex-direction:column;   /* 세로 배치 */
-      gap:8px;                 /* 줄 간 간격 */
-      margin-top:8px;
-    }
-    .kochip{
-      display:block;           /* 줄바꿈 강제 */
-      border:1px solid var(--line);
-      background:#182233;
-      color:#cfe0f2;
-      border-radius:999px;
-      padding:6px 10px;
-      font-size:12px;
-      text-decoration:none;
-      width:max-content;       /* 텍스트 길이만큼 */
-    }
-    .kochip:hover{ background:#20304a }
-  </style>
-</head>
-<body>
-<header><h1>Furigana + 번역</h1></header>
-<main>
-
-  <!-- 입력(접힘) -->
-  <section class="card">
-    <details id="inputBox">
-      <summary>
-        <span class="chev">▶</span>
-        <strong>입력 텍스트</strong>
-        <span class="hint">클릭하여 펼치기 · 단축키 Ctrl/⌘+Enter</span>
-      </summary>
-      <div style="margin-top:10px">
-        <textarea id="input" placeholder="일본어 텍스트를 붙여넣고 ‘후리가나 & 번역’ 버튼을 누르세요。"></textarea>
-        <div class="row" style="margin-top:10px">
-          <button class="btn primary" id="runBtn" type="button">후리가나 & 번역</button>
-        </div>
-      </div>
-    </details>
-  </section>
-
-  <!-- 원문(루비 토글, 독립 스크롤) -->
-  <section class="card">
-    <div class="label" style="margin-bottom:8px">원문</div>
-    <div id="rubyOut" class="pane" aria-live="polite"></div>
-    <div class="row" style="margin-top:8px; justify-content:flex-end">
-      <button class="btn" id="btnToggleRuby" type="button">루비 끄기</button>
-    </div>
-  </section>
-
-  <!-- 번역(독립 스크롤) -->
-  <section class="card">
-    <div class="label" style="margin-bottom:8px">번역</div>
-    <div id="transOut" class="pane" aria-live="polite"></div>
-  </section>
-</main>
-
-<!-- 단어 팝업 -->
-<div id="pop">
-  <!-- 헤더: 기본형(큰 글씨, "기본형의 읽기"를 rt로), (선택 글자) 작게 -->
-  <a id="popLink" class="popTitle" href="#" target="_blank" rel="noopener"></a>
-  <span id="popSub" class="popSub"></span>
-  <!-- 번역 텍스트 -->
-  <div id="popDeepl" class="popTrans"></div>
-  <!-- 한자 훈·음 칩 -->
-  <div id="popKo" class="kochips" style="display:none"></div>
-  <div class="popActions"><button class="btn" id="popClose" type="button">닫기</button></div>
-</div>
-
-<script>
-/* ===== 고정 엔드포인트 ===== */
-const FURIGANA_URL = "https://furigana-api-345684237835.asia-northeast3.run.app/furigana";
-const DEEPL_URL    = "https://solitary-mud-8caf.rlaalsrbr.workers.dev/translate";
-/* 로컬 한자-한국어 DB (index.html과 같은 폴더) */
-const KANJI_DB_URL = "./kanji_ko.min.json";
-
-/* ===== 유틸 ===== */
-const $ = (s)=>document.querySelector(s);
-function escapeHtml(s){ const d=document.createElement("div"); d.innerText=s; return d.innerHTML; }
-function escapeAttr(s){ return String(s).replace(/&/g,"&amp;").replace(/"/g,"&quot;").replace(/</g,"&lt;"); }
-function kata2hira(s){ return s.replace(/[\u30a1-\u30f6]/g, ch=>String.fromCharCode(ch.charCodeAt(0)-0x60)); }
-function hasKanji(s){ return /[\u4E00-\u9FFF]/.test(s); }
-function withTimeout(run, ms=45000, label="요청"){
-  const ctrl=new AbortController(); const t=setTimeout(()=>ctrl.abort(), ms);
-  return Promise.race([
-    run(ctrl.signal),
-    (async()=>{ await new Promise(r=>setTimeout(r, ms+50)); throw new Error(label+" 타임아웃("+ms+"ms)"); })()
-  ]).finally(()=>clearTimeout(t));
-}
-
-/* 넓은 공백(EM SPACE ×2) — 훈/음 사이 구분용 */
-const SEP_WIDE = "\u00A0\u00A0";
-
-/* ===== API ===== */
-async function callFurigana(text){
-  const body={ text, perChar:false };
-  const fetcher=(signal)=>fetch(FURIGANA_URL,{ method:"POST", headers:{ "Content-Type":"application/json" }, body:JSON.stringify(body), signal })
-    .then(r=>{ if(!r.ok) throw new Error("Furigana API "+r.status); return r.json(); });
-  return withTimeout(fetcher, 45000, "Furigana");
-}
-async function callDeepL(text, src="JA", tgt="KO"){
-  const body={ text, sourceLang:src, targetLang:tgt };
-  const fetcher=(signal)=>fetch(DEEPL_URL,{ method:"POST", headers:{ "Content-Type":"application/json" }, body:JSON.stringify(body), signal })
-    .then(r=>{ if(!r.ok) throw new Error("DeepL "+r.status); return r.json(); });
-  return withTimeout(fetcher, 45000, "DeepL");
-}
-
-/* ===== 로컬 한자 DB ===== */
-let KANJI_DB = null;
-async function loadKanjiDB(){
-  if (KANJI_DB) return KANJI_DB;
-  const res = await fetch(KANJI_DB_URL, { cache:"force-cache" });
-  if (!res.ok) throw new Error("kanji DB load " + res.status);
-  KANJI_DB = await res.json();
-  return KANJI_DB;
-}
-
-/* ===== 상태 ===== */
 let lastTokens=null;
 let rubyOn=true;
 
-/* ===== ruby DOM(항상 생성: rt를 CSS로 숨김) ===== */
-function buildRubyTokens(tokens){
-  return (tokens||[]).map((t, idx)=>{
-    const s=String(t.surface||"");
-    const r=String(t.reading||"");
-    const lemma=String(t.lemma||s);
-    const rt=r?kata2hira(r):"";
-    const inner=(hasKanji(s)&&rt)
-      ? '<ruby><rb>'+escapeHtml(s)+'</rb><rt>'+escapeHtml(rt)+'</rt></ruby>'
-      : escapeHtml(s);
-    const clickable=s.trim()?"1":"0";
-    return '<span class="tok" data-i="'+idx+'" data-clickable="'+clickable+'"'
-         + ' data-surface="'+escapeAttr(s)+'"'
-         + ' data-lemma="'+escapeAttr(lemma)+'"'
-         + ' data-reading="'+escapeAttr(rt)+'">'+ inner +'</span>';
-  }).join("");
-}
 function renderText(){
   if(!lastTokens) return;
   $("#rubyOut").innerHTML = buildRubyTokens(lastTokens);
   $("#rubyOut").classList.toggle("ruby-off", !rubyOn);
   $("#btnToggleRuby").textContent = rubyOn ? "루비 끄기" : "루비 켜기";
+  ensureDbs().then(()=>markAnkiHits());
 }
 
-/* ===== lemma 읽기 캐시 ===== */
-const lemmaReadCache=new Map();
-function readingFromTokens(tokens){
-  return (tokens||[]).map(t=>{
-    const s=String(t.surface||"");
-    const r=String(t.reading||"");
-    return r?kata2hira(r):s;
-  }).join("");
-}
-function getLemmaReading(lemma){
-  if(!lemma) return Promise.resolve("");
-  if(lemmaReadCache.has(lemma)) return Promise.resolve(lemmaReadCache.get(lemma));
-  return callFurigana(lemma).then(res=>{
-    const rt=readingFromTokens(res.tokens||[]);
-    lemmaReadCache.set(lemma, rt);
-    return rt;
-  }).catch(()=>{ lemmaReadCache.set(lemma, ""); return ""; });
-}
-
-/* ===== 팝업 ===== */
-const pop=$("#pop");
-const popLink=$("#popLink");
-const popSub=$("#popSub");
-const popDeepl=$("#popDeepl");
-const popKo=$("#popKo");
-
-function buildNaverSearchUrl(q){
-  return "https://ja.dict.naver.com/#/search?query=" + encodeURIComponent(q || "");
-}
-
-async function renderKoChipsForLemma(lemma){
-  popKo.style.display="none";
-  popKo.innerHTML="";
-  try{
-    const db = await loadKanjiDB();
-    const seen = new Set();
-    const chips = [];
-
-    for (const ch of Array.from(lemma)){
-      if (!/[\u4E00-\u9FFF]/.test(ch)) continue;   // 한자만
-      if (seen.has(ch)) continue;
-      seen.add(ch);
-
-      const rec = db[ch];  // {음:"", 훈:""} 또는 undefined
-      if (!rec) continue;
-
-      const hun = rec["훈"] || "";
-      const eum = rec["음"] || "";
-
-      // 훈 먼저, 넓은 공백 후 음
-      let kr = "";
-      if (hun) kr += hun;
-      if (hun && eum) kr += SEP_WIDE;
-      if (eum) kr += eum;
-
-      const label = kr ? `${ch} · ${kr}` : ch;
-
-      const href  = "https://hanja.dict.naver.com/#/search?query=" + encodeURIComponent(ch);
-      chips.push(
-        '<a class="kochip" href="'+escapeAttr(href)+'" target="_blank" rel="noopener">'
-        + escapeHtml(label) + '</a>'
-      );
-    }
-
-    if (chips.length){
-      popKo.innerHTML = chips.join("");
-      popKo.style.display = "flex";   /* 세로 리스트 보이기 */
-    }
-  }catch(e){
-    /* 조용히 무시 */
-  }
-}
-
-function openPop(x, y, payload){
-  const surface = payload.surface || "";
-  const lemma   = payload.lemma   || surface;
-
-  // 헤더 링크: 네이버 검색 페이지
-  popLink.innerHTML = escapeHtml(lemma);
-  popLink.href = buildNaverSearchUrl(lemma);
-  popSub.textContent = (surface && surface!==lemma) ? "(" + surface + ")" : "";
-
-  // lemma 읽기(rt)로 헤더를 ruby로 업데이트
-  if(hasKanji(lemma)){
-    getLemmaReading(lemma).then(rt=>{
-      popLink.innerHTML = rt
-        ? '<ruby><rb>'+escapeHtml(lemma)+'</rb><rt>'+escapeHtml(rt)+'</rt></ruby>'
-        : escapeHtml(lemma);
-    });
-  }
-
-  // 번역(lemma 기준)
-  popDeepl.textContent="불러오는 중…";
-  callDeepL(lemma, "JA", "KO").then(res=>{
-    const t = res.translation || res.result || res.data || "";
-    popDeepl.textContent = t || "(결과 없음)";
-  }).catch(e=>{
-    popDeepl.textContent = "에러: " + (e && e.message ? e.message : String(e));
-  });
-
-  // 한자 훈·음 칩 (로컬 DB)
-  renderKoChipsForLemma(lemma);
-
-  // 위치 및 표시
-  const pad=8, vw=window.innerWidth, vh=window.innerHeight;
-  pop.style.left = Math.min(x+pad, vw-380) + "px";
-  pop.style.top  = Math.min(y+pad, vh-260) + "px";
-  pop.style.display = "block";
-}
-function closePop(){ pop.style.display="none"; }
-$("#popClose").addEventListener("click", closePop);
-document.addEventListener("click", (e)=>{
-  if(pop.style.display==="block"){
-    if(!pop.contains(e.target) && !e.target.closest(".tok")) closePop();
-  }
-});
-
-/* ===== 실행 ===== */
 async function runBoth(){
   const text = $("#input").value.trim();
   if(!text){
@@ -687,7 +487,7 @@ async function runBoth(){
   try{
     const [furi, tr] = await Promise.all([callFurigana(text), callDeepL(text, "JA", "KO")]);
     lastTokens = furi.tokens || [];
-    renderText(); // rt 토글 방식이라 줄간격 유지
+    renderText();
     const t = tr.translation || tr.result || tr.data || "";
     $("#transOut").innerHTML = t ? escapeHtml(t).replace(/\n/g,"<br>") : "<em style='color:#9fb0c2'>결과 없음</em>";
   }catch(e){
@@ -696,7 +496,7 @@ async function runBoth(){
   }
 }
 
-/* 이벤트 바인딩 */
+/* 이벤트 */
 $("#runBtn").addEventListener("click", runBoth);
 $("#btnToggleRuby").addEventListener("click", ()=>{
   rubyOn = !rubyOn;
@@ -715,13 +515,11 @@ $("#rubyOut").addEventListener("click", (e)=>{
 window.addEventListener("keydown", (e)=>{
   if((e.ctrlKey||e.metaKey) && e.key==="Enter"){ e.preventDefault(); runBoth(); }
 });
-
-/* details 열릴 때 포커스 */
 $("#inputBox").addEventListener("toggle", ()=>{
   if($("#inputBox").open){ $("#input").focus(); }
 });
 
-/* ===== 단축어 연동: ?text=...&auto=1 (이중 인코딩 복원 포함) ===== */
+/* ===== 단축어 연동 ===== */
 function getQueryText(){
   const sp=new URLSearchParams(location.search);
   let q = sp.get("text");
@@ -740,7 +538,3 @@ function getQueryText(){
 </script>
 </body>
 </html>
-
-
-
-
