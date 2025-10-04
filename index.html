@@ -40,9 +40,26 @@
     .popSub{font-size:12px;color:#9fb0c2;margin-left:6px}
     .popTrans{font-size:15px;color:#cfe0f2;margin-top:8px;word-break:break-word}
     .popActions{display:flex;gap:8px;justify-content:flex-end;margin-top:10px}
-    .kochips{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
-    .kochip{border:1px solid var(--line);background:#182233;color:#cfe0f2;border-radius:999px;padding:6px 10px;font-size:12px;text-decoration:none}
-    .kochip:hover{background:#20304a}
+
+    /* 🔻 한자 칩: 한 줄에 하나씩(세로), 훈/음 구분 가독 */
+    .kochips{
+      display:flex;
+      flex-direction:column;   /* 세로 배치 */
+      gap:8px;                 /* 줄 간 간격 */
+      margin-top:8px;
+    }
+    .kochip{
+      display:block;           /* 줄바꿈 강제 */
+      border:1px solid var(--line);
+      background:#182233;
+      color:#cfe0f2;
+      border-radius:999px;
+      padding:6px 10px;
+      font-size:12px;
+      text-decoration:none;
+      width:max-content;       /* 텍스트 길이만큼 */
+    }
+    .kochip:hover{ background:#20304a }
   </style>
 </head>
 <body>
@@ -84,12 +101,12 @@
 
 <!-- 단어 팝업 -->
 <div id="pop">
-  <!-- 헤더: 기본형(큰 글씨, "기본형의 읽기"를 rt로), (선택 글자) 작게, 전체 링크(검색 페이지) -->
+  <!-- 헤더: 기본형(큰 글씨, "기본형의 읽기"를 rt로), (선택 글자) 작게 -->
   <a id="popLink" class="popTitle" href="#" target="_blank" rel="noopener"></a>
   <span id="popSub" class="popSub"></span>
   <!-- 번역 텍스트 -->
   <div id="popDeepl" class="popTrans"></div>
-  <!-- (있으면) 한자 훈·음 칩 -->
+  <!-- 한자 훈·음 칩 -->
   <div id="popKo" class="kochips" style="display:none"></div>
   <div class="popActions"><button class="btn" id="popClose" type="button">닫기</button></div>
 </div>
@@ -98,7 +115,7 @@
 /* ===== 고정 엔드포인트 ===== */
 const FURIGANA_URL = "https://furigana-api-345684237835.asia-northeast3.run.app/furigana";
 const DEEPL_URL    = "https://solitary-mud-8caf.rlaalsrbr.workers.dev/translate";
-/* 🔹 로컬 한자-한국어 DB (index.html과 같은 폴더에 둔 파일) */
+/* 로컬 한자-한국어 DB (index.html과 같은 폴더) */
 const KANJI_DB_URL = "./kanji_ko.min.json";
 
 /* ===== 유틸 ===== */
@@ -114,6 +131,9 @@ function withTimeout(run, ms=45000, label="요청"){
     (async()=>{ await new Promise(r=>setTimeout(r, ms+50)); throw new Error(label+" 타임아웃("+ms+"ms)"); })()
   ]).finally(()=>clearTimeout(t));
 }
+
+/* 넓은 공백(EM SPACE ×2) — 훈/음 사이 구분용 */
+const SEP_WIDE = "\u2003\u2003";
 
 /* ===== API ===== */
 async function callFurigana(text){
@@ -206,23 +226,37 @@ async function renderKoChipsForLemma(lemma){
     const chips = [];
 
     for (const ch of Array.from(lemma)){
-      if (!/[\u4E00-\u9FFF]/.test(ch)) continue;
+      if (!/[\u4E00-\u9FFF]/.test(ch)) continue;   // 한자만
       if (seen.has(ch)) continue;
       seen.add(ch);
+
       const rec = db[ch];  // {음:"", 훈:""} 또는 undefined
       if (!rec) continue;
 
-      const label = [ch, rec["음"], rec["훈"]].filter(Boolean).join(" · ");
+      const hun = rec["훈"] || "";
+      const eum = rec["음"] || "";
+
+      // 훈 먼저, 넓은 공백 후 음
+      let kr = "";
+      if (hun) kr += hun;
+      if (hun && eum) kr += SEP_WIDE;
+      if (eum) kr += eum;
+
+      const label = kr ? `${ch} · ${kr}` : ch;
+
       const href  = "https://hanja.dict.naver.com/#/search?query=" + encodeURIComponent(ch);
-      chips.push('<a class="kochip" href="'+escapeAttr(href)+'" target="_blank" rel="noopener">'+escapeHtml(label)+'</a>');
+      chips.push(
+        '<a class="kochip" href="'+escapeAttr(href)+'" target="_blank" rel="noopener">'
+        + escapeHtml(label) + '</a>'
+      );
     }
 
     if (chips.length){
       popKo.innerHTML = chips.join("");
-      popKo.style.display = "flex";
+      popKo.style.display = "flex";   /* 세로 리스트 보이기 */
     }
   }catch(e){
-    // 조용히 무시 (DB 없거나 로딩 실패)
+    /* 조용히 무시 */
   }
 }
 
