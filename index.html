@@ -81,10 +81,10 @@
 
 <!-- 단어 팝업 -->
 <div id="pop">
-  <!-- 헤더: 기본형(큰 글씨, 루비), (선택 글자) 작게, 전체 링크 -->
+  <!-- 헤더: 기본형(큰 글씨, "기본형의 읽기"를 rt로), (선택 글자) 작게, 전체 링크 -->
   <a id="popLink" class="popTitle" href="#" target="_blank" rel="noopener"></a>
   <span id="popSub" class="popSub"></span>
-  <!-- 번역 결과 텍스트 (라벨 없음) -->
+  <!-- 번역 결과 텍스트 -->
   <div id="popDeepl" class="popTrans"></div>
   <div class="popActions"><button class="btn" id="popClose" type="button">닫기</button></div>
 </div>
@@ -161,11 +161,30 @@ function renderText(){
   $("#btnToggleRuby").textContent = rubyOn ? "루비 끄기" : "루비 켜기";
 }
 
-/* ===== 네이버 사전 링크 생성(검색 페이지로 이동) ===== */
+/* ===== 네이버 사전 링크(검색 페이지) ===== */
 function buildNaverUrl(lemma){
   var q = encodeURIComponent(lemma || "");
-  // 한국어 UI의 일본어사전도 SPA라 해시 라우팅을 씀. 검색 결과로 이동(안정).
   return "https://ja.dict.naver.com/#/search?query=" + q;
+}
+
+/* ===== lemma 읽기 캐시 ===== */
+var lemmaReadCache = new Map();
+function buildReadingFromTokens(tokens){
+  // 각 토큰의 reading(카타카나)을 히라가나로 변환, 없으면 surface 사용
+  return (tokens||[]).map(function(t){
+    var s = String(t.surface || "");
+    var r = String(t.reading || "");
+    return r ? kata2hira(r) : s;
+  }).join("");
+}
+function getLemmaReading(lemma){
+  if(!lemma) return Promise.resolve("");
+  if(lemmaReadCache.has(lemma)) return Promise.resolve(lemmaReadCache.get(lemma));
+  return callFurigana(lemma).then(function(res){
+    var rt = buildReadingFromTokens(res.tokens || []);
+    lemmaReadCache.set(lemma, rt);
+    return rt;
+  }).catch(function(){ lemmaReadCache.set(lemma, ""); return ""; });
 }
 
 /* ===== 팝업 ===== */
@@ -177,22 +196,26 @@ var popDeepl = $("#popDeepl");
 function openPop(x, y, payload){
   var surface = payload.surface || "";
   var lemma   = payload.lemma   || surface;
-  var reading = payload.reading || "";
 
-  // 헤더: 기본형을 제목으로, rt는 위에(루비), 선택 글자는 괄호로 작게
-  var titleHtml;
-  if(reading && hasKanji(lemma)){
-    titleHtml = '<ruby><rb>' + escapeHtml(lemma) + '</rb><rt>' + escapeHtml(reading) + '</rt></ruby>';
-  } else {
-    titleHtml = escapeHtml(lemma);
-  }
-  popLink.innerHTML = titleHtml;
+  // 우선 제목은 기본형 "텍스트만"으로 표시
+  popLink.innerHTML = escapeHtml(lemma);
   popLink.href = buildNaverUrl(lemma);
   popSub.textContent = surface && surface !== lemma ? "(" + surface + ")" : "";
 
-  // 번역
+  // 기본형의 읽기를 별도 호출로 취득 → 헤더를 ruby로 업데이트
+  if(hasKanji(lemma)){
+    getLemmaReading(lemma).then(function(rt){
+      if(rt){
+        popLink.innerHTML = '<ruby><rb>' + escapeHtml(lemma) + '</rb><rt>' + escapeHtml(rt) + '</rt></ruby>';
+      }else{
+        popLink.innerHTML = escapeHtml(lemma);
+      }
+    });
+  }
+
+  // 번역(lemma 기준)
   popDeepl.textContent = "불러오는 중…";
-  callDeepL(lemma || surface, "JA", "KO").then(function(res){
+  callDeepL(lemma, "JA", "KO").then(function(res){
     var t = res.translation || res.result || res.data || "";
     popDeepl.textContent = t || "(결과 없음)";
   }).catch(function(e){
@@ -247,8 +270,7 @@ $("#rubyOut").addEventListener("click", function(e){
   if(!el || el.dataset.clickable === "0") return;
   openPop(e.clientX, e.clientY, {
     surface: el.dataset.surface || "",
-    lemma:   el.dataset.lemma   || "",
-    reading: el.dataset.reading || ""
+    lemma:   el.dataset.lemma   || ""
   });
 });
 window.addEventListener("keydown", function(e){
