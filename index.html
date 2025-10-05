@@ -156,6 +156,21 @@ function withTimeout(run,ms=45000,label="요청"){
 }
 const SEP_WIDE=" ";
 
+/* ===== DeepL 전처리: 반복 축약 + 이모지 제거 ===== */
+const EMOJI_RE = /[\u{1F1E6}-\u{1F1FF}\u{1F300}-\u{1F5FF}\u{1F600}-\u{1F64F}\u{1F680}-\u{1F6FF}\u{1F700}-\u{1F77F}\u{1F780}-\u{1F7FF}\u{1F800}-\u{1F8FF}\u{1F900}-\u{1F9FF}\u{1FA00}-\u{1FAFF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu;
+function compressRepeats(s){
+  return s.replace(/([ぁ-んァ-ン一-龯A-Za-zーｗW！？!?])\1{2,}/gu, '$1$1');
+}
+function preprocessTextForDeepL(s){
+  if(!s) return s;
+  return compressRepeats(
+    s.replace(/\u200D/g,'')                 // ZWJ
+     .replace(/[\uFE0E\uFE0F]/g,'')         // variation selectors
+     .replace(/[\u{1F3FB}-\u{1F3FF}]/gu,'')  // skin tones
+     .replace(EMOJI_RE,'')                  // emojis
+  );
+}
+
 /* ===== API ===== */
 async function callFurigana(text){
   const body={text,perChar:false};
@@ -187,7 +202,8 @@ function splitForTranslate(text, maxLen = 3000){
   return parts;
 }
 async function translateSmart(text, src="JA", tgt="KO"){
-  const chunks = splitForTranslate(text);
+  const cleaned = preprocessTextForDeepL(text);   /* 전처리 적용 */
+  const chunks = splitForTranslate(cleaned);
   const out = [];
   for (const [i,chunk] of chunks.entries()){
     let tries=0;
@@ -321,7 +337,7 @@ function getLemmaReading(lemma){
   }).catch(()=>{ lemmaReadCache.set(lemma,""); return ""; });
 }
 
-/* ===== 팝업 위치: 토큰 바로 아래 정렬(잘리면 좌/우·필요시 위) ===== */
+/* ===== 팝업 위치: 토큰 바로 아래(잘리면 좌/우·필요시 위) ===== */
 function positionPopupToToken(tokEl){
   const pad = 8;
   pop.style.visibility = "hidden";
@@ -389,7 +405,6 @@ async function fillKanjiBoxes(lemma){
   await ensureDbs();
   const dbA=ANKI_DB, dbK=KANJI_DB;
 
-  // 단어 내 등장 순서를 유지하면서 중복은 첫 등장만
   const uniq=[];
   for(const ch of Array.from(lemma)){
     if(/[\u4E00-\u9FFF]/.test(ch) && !uniq.includes(ch)) uniq.push(ch);
@@ -442,7 +457,7 @@ function openPopBelowToken(tokEl, payload){
   }
 
   popDeepl.textContent="불러오는 중…";
-  callDeepL(lemma,"JA","KO").then(res=>{
+  callDeepL(preprocessTextForDeepL(lemma),"JA","KO").then(res=>{
     const t=res.translation||res.result||res.data||"";
     popDeepl.textContent=t||"(결과 없음)";
   }).catch(e=>{ popDeepl.textContent="에러: "+(e&&e.message?e.message:String(e)); });
