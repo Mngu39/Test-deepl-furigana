@@ -480,15 +480,20 @@ function openPopBelowToken(tokEl, payload){
     }
   }
 
-  callDeepL(preprocessTextForDeepL(textForDeepl),"JA","KO")
-    .then(res=>{
-      const t=res.translation||res.result||res.data||"";
-      popDeepl.textContent=t||"(결과 없음)";
-    })
-    .catch(e=>{
-      popDeepl.textContent="에러: "+(e&&e.message?e.message:String(e));
-    });
+  callDeepL(preprocessTextForDeepl(textForDeepl),"JA","KO")
+  .then(res=>{
+    let t = res.translation || res.result || res.data || "";
 
+    // ★ 짧은 항목에만: 번역문 끝의 "(문맥: …)" / "（文脈: …）" 제거
+    if (isVeryShortLemma(lemma)) {
+      t = t.replace(/[\s\u00A0]*[\(（]\s*(문맥|文脈)\s*:\s*.*?[\)）]/g, "").trim();
+    }
+
+    popDeepl.textContent = t || "(결과 없음)";
+  })
+  .catch(e=>{
+    popDeepl.textContent = "에러: " + (e?.message ?? String(e));
+  });
   fillKanjiBoxes(lemma);
   positionPopupToToken(tokEl);
 }
