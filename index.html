@@ -469,25 +469,29 @@ function openPopBelowToken(tokEl, payload){
     });
   }
 
-  popDeepl.textContent="불러오는 중…";
+  popDeepl.textContent = "불러오는 중…";
 
-  let textForDeepl = lemma;
+  let textForDeepL = lemma;
   const tIdx = Number(tokEl.dataset.i || -1);
-  if (isVeryShortLemma(lemma)){
-    const ctx = contextAround(APP.lastTokens||[], tIdx);
-    if (ctx.trim()){
-      textForDeepl = `${lemma}（文脈:${ctx}）`;
+  if (isVeryShortLemma(lemma)) {
+    const ctx = contextAround(APP.lastTokens || [], tIdx);
+    if (ctx.trim()) {
+      textForDeepL = `${lemma}（文脈:${ctx}）`;
     }
   }
 
-  callDeepL(preprocessTextForDeepl(textForDeepl),"JA","KO")
-  .then(res=>{
-    let t = res.translation || res.result || res.data || "";
-
-    // ★ 짧은 항목에만: 번역문 끝의 "(문맥: …)" / "（文脈: …）" 제거
-    if (isVeryShortLemma(lemma)) {
-      t = t.replace(/[\s\u00A0]*[\(（]\s*(문맥|文脈)\s*:\s*.*?[\)）]/g, "").trim();
-    }
+  callDeepL(preprocessTextForDeepL(textForDeepL), "JA", "KO")
+    .then(res => {
+      let t = res.translation || res.result || res.data || "";
+      // 팝업 표시에는 "(문맥:…)" 제거
+      if (isVeryShortLemma(lemma)) {
+        t = t.replace(/[\s\u00A0]*[\(（]\s*(?:문맥|文脈)\s*:\s*.*?[\)）]/g, "").trim();
+      }
+      popDeepl.textContent = t || "(결과 없음)";
+    })
+  .catch(e => {
+    popDeepl.textContent = "에러: " + (e && e.message ? e.message : String(e));
+  });
 
     popDeepl.textContent = t || "(결과 없음)";
   })
