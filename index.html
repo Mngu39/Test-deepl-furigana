@@ -8,8 +8,9 @@
 <style>
   :root{
     --bg:#0b0f14; --card:#11161f; --ink:#e6edf3; --line:#223044; --muted:#9fb0c2; --accent:#5aa9ff;
-    --anki-bg:#112019; --anki-border:#1f3b2d; --anki-ink:#cfe0f2;
-    --learn-bg:#0f7d59; --learn-border:#1cc98a; --learn-ink:#ffffff;
+    /* 초록 테마 */
+    --anki-bg:#112019; --anki-border:#1f3b2d; --anki-ink:#cfe0f2;      /* 아는(옅은) */
+    --learn-bg:#0f7d59; --learn-border:#1cc98a; --learn-ink:#ffffff;  /* 모르는(선명) */
   }
   *{box-sizing:border-box}
   body{margin:0;background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,Segoe UI,Roboto,Noto Sans,Apple SD Gothic Neo,sans-serif}
@@ -27,7 +28,7 @@
 
   ruby{ruby-position:over}
   ruby rt{font-size:.8em;color:#b9c8d8;opacity:1;transition:opacity .15s ease}
-  #rubyOut.ruby-off ruby rt{opacity:0}
+  #rubyOut.ruby-off ruby rt{opacity:0}  /* 줄간격 유지 */
 
   .tok{padding:1px 2px;border-radius:6px;cursor:pointer}
   .tok:hover{background:#1a2436}
@@ -43,6 +44,7 @@
   details[open] .chev{transform:rotate(90deg)}
   .hint{margin-left:auto;color:#9fb0c2;font-size:12px}
 
+  /* 팝업 */
   #pop{
     position:fixed; z-index:9999;
     max-width:min(92vw,520px);
@@ -59,13 +61,15 @@
   .popMsg{font-size:12px;color:#9fb0c2;margin-top:8px}
   .popActions{display:flex;gap:8px;justify-content:flex-end;margin-top:10px}
 
+  /* 한자 리스트 */
   .kanjiList{display:flex;flex-direction:column;gap:8px;margin-top:8px}
   .kbox{border:1px solid var(--line);border-radius:12px;padding:8px 10px}
   .kbox.anki{background:var(--anki-bg);color:var(--anki-ink);border-color:var(--anki-border)}
   .kbox.learn{background:var(--learn-bg);color:var(--learn-ink);border-color:var(--learn-border)}
-  .khead{display:flex;align-items:center;gap:8px;font-size:14px;font-weight:700;background:transparent;border:0;padding:0}
+  .khead{display:flex;align-items:center;gap:8px;font-size:14px;font-weight:700;background:transparent;border:0;padding:0;border-radius:0}
   .khead.toggle{cursor:pointer}
   .khead.link{cursor:pointer;text-decoration:none;color:inherit}
+  .khead.link:hover{filter:brightness(1.08)}
   .kdesc{display:none;margin-top:6px;font-size:13px;line-height:1.5;white-space:pre-wrap;border-top:1px dashed rgba(255,255,255,.12); padding-top:6px}
   .kbox.open .kdesc{display:block}
 </style>
@@ -102,6 +106,7 @@
   </section>
 </main>
 
+<!-- 팝업 -->
 <div id="pop">
   <a id="popLink" class="popTitle" href="#" target="_blank" rel="noopener"></a>
   <span id="popSub" class="popSub"></span>
@@ -141,14 +146,18 @@ function withTimeout(run,ms=45000,label="요청"){
 }
 const SEP_WIDE=" ";
 
-/* ===== DeepL 전처리 ===== */
+/* ===== DeepL 전처리: 반복 축약 + 이모지 제거 ===== */
 const EMOJI_RE = /[\u{1F1E6}-\u{1F1FF}\u{1F300}-\u{1F5FF}\u{1F600}-\u{1F64F}\u{1F680}-\u{1F6FF}\u{1F700}-\u{1F77F}\u{1F780}-\u{1F7FF}\u{1F800}-\u{1F8FF}\u{1F900}-\u{1F9FF}\u{1FA00}-\u{1FAFF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu;
-function compressRepeats(s){ return s.replace(/([ぁ-んァ-ン一-龯A-Za-zーｗW！？!?])\1{2,}/gu,'$1$1'); }
+function compressRepeats(s){
+  return s.replace(/([ぁ-んァ-ン一-龯A-Za-zーｗW！？!?])\1{2,}/gu, '$1$1');
+}
 function preprocessTextForDeepL(s){
   if(!s) return s;
   return compressRepeats(
-    s.replace(/\u200D/g,'').replace(/[\uFE0E\uFE0F]/g,'')
-     .replace(/[\u{1F3FB}-\u{1F3FF}]/gu,'').replace(EMOJI_RE,'')
+    s.replace(/\u200D/g,'')
+     .replace(/[\uFE0E\uFE0F]/g,'')
+     .replace(/[\u{1F3FB}-\u{1F3FF}]/gu,'')
+     .replace(EMOJI_RE,'')
   );
 }
 
@@ -166,28 +175,39 @@ async function callDeepL(text,src="JA",tgt="KO"){
   return withTimeout(fetcher,45000,"DeepL");
 }
 
-/* ===== 번역(줄 단위) ===== */
+/* ===== 번역: 줄바꿈 기준 ===== */
 function splitLineSafely(line, maxLen = 3000){
-  const out=[]; if(line.length<=maxLen){out.push(line);return out;}
-  const segs=line.split(/(?<=[。．\.！？!?；;：:])/); let buf="";
-  for(const s of segs){
-    if((buf+s).length>maxLen){ if(buf) out.push(buf),buf="";
-      if(s.length>maxLen){ for(let i=0;i<s.length;i+=maxLen) out.push(s.slice(i,i+maxLen)); }
-      else buf=s;
-    }else buf+=s;
+  const out = [];
+  if (line.length <= maxLen){ out.push(line); return out; }
+  const segs = line.split(/(?<=[。．\.！？!?；;：:])/);
+  let buf = "";
+  for (const s of segs){
+    if ((buf + s).length > maxLen){
+      if (buf) out.push(buf), buf="";
+      if (s.length > maxLen){
+        for (let i=0;i<s.length;i+=maxLen) out.push(s.slice(i, i+maxLen));
+      } else { buf = s; }
+    } else { buf += s; }
   }
-  if(buf) out.push(buf); return out;
+  if (buf) out.push(buf);
+  return out;
 }
 async function translateByLines(text, src="JA", tgt="KO"){
-  const lines=String(text).split(/\r?\n/); const results=[];
-  for(const line of lines){
-    if(!line.trim()){results.push(""); continue;}
-    const cleaned=preprocessTextForDeepL(line);
-    const chunks=splitLineSafely(cleaned); const pieces=[];
-    for(const [i,chunk] of chunks.entries()){
-      try{ const r=await callDeepL(chunk,src,tgt); pieces.push(r.translation||r.result||r.data||""); }
-      catch{ pieces.push(chunk); }
-      if(i<chunks.length-1) await new Promise(r=>setTimeout(r,120));
+  const lines = String(text).split(/\r?\n/);
+  const results = [];
+  for (const line of lines){
+    if (!line.trim()){ results.push(""); continue; }
+    const cleaned = preprocessTextForDeepL(line);
+    const chunks = splitLineSafely(cleaned);
+    const pieces = [];
+    for (const [i,chunk] of chunks.entries()){
+      try{
+        const r = await callDeepL(chunk, src, tgt);
+        pieces.push(r.translation || r.result || r.data || "");
+      }catch(e){
+        pieces.push(chunk);  // 실패 조각은 원문 유지
+      }
+      if (i < chunks.length-1) await new Promise(r=>setTimeout(r,120));
     }
     results.push(pieces.join(""));
   }
@@ -197,19 +217,29 @@ async function translateByLines(text, src="JA", tgt="KO"){
 /* ===== DB 로드 ===== */
 let KANJI_DB=null, ANKI_DB=null;
 async function loadJsonGraceful(url){
-  try{ const url2=/[^\x00-\x7F]/.test(url)?encodeURI(url):url;
-       const r=await fetch(url2,{cache:"force-cache"}); if(!r.ok) throw new Error("HTTP "+r.status);
-       return await r.json();
+  try{
+    const url2=/[^\x00-\x7F]/.test(url)?encodeURI(url):url;
+    const r=await fetch(url2,{cache:"force-cache"});
+    if(!r.ok) throw new Error("HTTP "+r.status);
+    return await r.json();
   }catch(e){ console.error("JSON load failed:",url,e); return null; }
 }
 function buildDbFromCrowdAnki(deck){
-  const modelMap=new Map(); const nms=deck.note_models||deck["note_models"]||[];
+  const modelMap=new Map();
+  const nms=deck.note_models||deck["note_models"]||[];
   for(const m of nms){
     const uuid=m["crowdanki_uuid"]||m["id"]||m["uuid"]||m["note_model_uuid"];
-    const flds=(m.flds||m["flds"]||[]).map(o=>o&&(o.name||o["name"]||"")); if(uuid&&flds.length) modelMap.set(uuid,flds);
+    const flds=(m.flds||m["flds"]||[]).map(o=>o&&(o.name||o["name"]||""));
+    if(uuid&&flds.length) modelMap.set(uuid,flds);
   }
-  const db={}; const notes=[]; (function walk(x){ if(!x) return;
-    if(Array.isArray(x)){x.forEach(walk); return;} if(typeof x==="object"){ if(Array.isArray(x.notes)) notes.push(...x.notes); for(const k in x) walk(x[k]); }
+  const db={}; const notes=[];
+  (function walk(x){
+    if(!x) return;
+    if(Array.isArray(x)){x.forEach(walk); return;}
+    if(typeof x==="object"){
+      if(Array.isArray(x.notes)) notes.push(...x.notes);
+      for(const k in x) walk(x[k]);
+    }
   })(deck);
 
   function splitHunEum(backText){
@@ -221,18 +251,27 @@ function buildDbFromCrowdAnki(deck){
   }
 
   for(const note of notes){
-    const uuid=note["note_model_uuid"]; const names=modelMap.get(uuid)||[]; const vals=note["fields"]||note["flds"]||[];
+    const uuid=note["note_model_uuid"];
+    const names=modelMap.get(uuid)||[];
+    const vals=note["fields"]||note["flds"]||[];
     const iFront=names.findIndex(n=>/^front$/i.test(n));
     const iBack =names.findIndex(n=>/^back$/i.test(n));
     const iExpl =names.findIndex(n=>/^explain$/i.test(n));
-    const kanji=stripHtml(iFront>=0?vals[iFront]:""); const back=iBack>=0?vals[iBack]:""; const memo=iExpl>=0?vals[iExpl]:"";
-    const {hun,eum}=splitHunEum(back); const memoText=htmlToPlainWithBreaks(memo);
+    const kanji=stripHtml(iFront>=0?vals[iFront]:"");
+    const back =iBack>=0 ?vals[iBack] :"";
+    const memo =iExpl>=0 ?vals[iExpl] :"";
+    const {hun,eum}=splitHunEum(back);
+    const memoText=htmlToPlainWithBreaks(memo);
+
     if(!kanji) continue;
     for(const ch of Array.from(kanji)){
       if(!/[\u4E00-\u9FFF]/.test(ch)) continue;
       const rec=db[ch]||{"훈":"", "음":"" , "설명":""};
-      function merge(oldVal,newVal){ const arr=(oldVal?oldVal.split(","):[]).map(s=>s.trim()).filter(Boolean);
-        for(const t of (newVal?newVal.split(","):[])){ const s=t.trim(); if(s&&!arr.includes(s)) arr.push(s); } return arr.join(", "); }
+      function merge(oldVal,newVal){
+        const arr=(oldVal?oldVal.split(","):[]).map(s=>s.trim()).filter(Boolean);
+        for(const t of (newVal?newVal.split(","):[])){ const s=t.trim(); if(s&&!arr.includes(s)) arr.push(s); }
+        return arr.join(", ");
+      }
       if(hun) rec["훈"]=merge(rec["훈"],hun);
       if(eum) rec["음"]=merge(rec["음"],eum);
       if(memoText && memoText.length>(rec["설명"]||"").length) rec["설명"]=memoText;
@@ -243,7 +282,10 @@ function buildDbFromCrowdAnki(deck){
 }
 async function ensureDbs(){
   if(!KANJI_DB) KANJI_DB=await loadJsonGraceful(KANJI_DB_URL);
-  if(ANKI_DB===null){ const deck=await loadJsonGraceful(CROWDANKI_URL); ANKI_DB=deck?buildDbFromCrowdAnki(deck):null; }
+  if(ANKI_DB===null){
+    const deck=await loadJsonGraceful(CROWDANKI_URL);
+    ANKI_DB=deck?buildDbFromCrowdAnki(deck):null;
+  }
 }
 
 /* ===== 상태 ===== */
@@ -252,15 +294,22 @@ const APP=(function(){ if(!window.__APP__) window.__APP__={lastTokens:null,rubyO
 /* ===== 원문 렌더 ===== */
 function buildRubyTokens(tokens){
   return (tokens||[]).map((t,idx)=>{
-    const s=String(t.surface||""); const r=String(t.reading||""); const lemma=String(t.lemma||s);
-    const rt=r?kata2hira(r):""; const inner=(hasKanji(s)&&rt)
-      ? '<ruby><rb>'+escapeHtml(s)+'</rb><rt>'+escapeHtml(rt)+'</rt></ruby>' : escapeHtml(s);
+    const s=String(t.surface||"");
+    const r=String(t.reading||"");
+    const lemma=String(t.lemma||s);
+    const rt=r?kata2hira(r):"";
+    const inner=(hasKanji(s)&&rt)
+      ? '<ruby><rb>'+escapeHtml(s)+'</rb><rt>'+escapeHtml(rt)+'</rt></ruby>'
+      : escapeHtml(s);
     const clickable=s.trim()?"1":"0";
     return '<span class="tok" data-i="'+idx+'" data-clickable="'+clickable+'"'
-      +' data-surface="'+escapeAttr(s)+'" data-lemma="'+escapeAttr(lemma)+'" data-reading="'+escapeAttr(rt)+'">'+inner+'</span>';
+      +' data-surface="'+escapeAttr(s)+'"'
+      +' data-lemma="'+escapeAttr(lemma)+'"'
+      +' data-reading="'+escapeAttr(rt)+'">'+inner+'</span>';
   }).join("");
 }
-function renderText(){ if(!APP.lastTokens) return;
+function renderText(){
+  if(!APP.lastTokens) return;
   $("#rubyOut").innerHTML=buildRubyTokens(APP.lastTokens);
   $("#rubyOut").classList.toggle("ruby-off",!APP.rubyOn);
   $("#btnToggleRuby").textContent = APP.rubyOn ? "루비 끄기" : "루비 켜기";
@@ -268,24 +317,44 @@ function renderText(){ if(!APP.lastTokens) return;
 
 /* ===== lemma 읽기 캐시 ===== */
 const lemmaReadCache=new Map();
-function readingFromTokens(tokens){ return (tokens||[]).map(t=>{const r=String(t.reading||""); const s=String(t.surface||""); return r?kata2hira(r):s;}).join(""); }
+function readingFromTokens(tokens){
+  return (tokens||[]).map(t=>{const s=String(t.surface||""); const r=String(t.reading||""); return r?kata2hira(r):s;}).join("");
+}
 function getLemmaReading(lemma){
-  if(!lemma) return Promise.resolve(""); if(lemmaReadCache.has(lemma)) return Promise.resolve(lemmaReadCache.get(lemma));
-  return callFurigana(lemma).then(res=>{ const rt=readingFromTokens(res.tokens||[]); lemmaReadCache.set(lemma,rt); return rt; })
-    .catch(()=>{ lemmaReadCache.set(lemma,""); return ""; });
+  if(!lemma) return Promise.resolve("");
+  if(lemmaReadCache.has(lemma)) return Promise.resolve(lemmaReadCache.get(lemma));
+  return callFurigana(lemma).then(res=>{
+    const rt=readingFromTokens(res.tokens||[]);
+    lemmaReadCache.set(lemma,rt); return rt;
+  }).catch(()=>{ lemmaReadCache.set(lemma,""); return ""; });
 }
 
-/* ===== 팝업 위치 ===== */
+/* ===== 팝업 위치(토큰 바로 아래) ===== */
 function positionPopupToToken(tokEl){
-  const pad=8; pop.style.visibility="hidden"; pop.style.display="block";
-  const prect=tokEl.getBoundingClientRect(); const rect=pop.getBoundingClientRect();
-  const vw=window.innerWidth, vh=window.innerHeight;
-  let left=prect.left, top=prect.bottom+6;
-  if(left+rect.width+pad>vw) left=Math.max(vw-rect.width-pad,pad);
-  if(left<pad) left=pad;
-  if(top+rect.height+pad>vh){ const tryTop=prect.top-rect.height-6; top=(tryTop>=pad)?tryTop:Math.max(vh-rect.height-pad,pad); }
-  if(vw<360){ left=Math.max((vw-rect.width)/2,pad); }
-  pop.style.left=`${left}px`; pop.style.top=`${top}px`; pop.style.visibility="visible";
+  const pad = 8;
+  pop.style.visibility = "hidden";
+  pop.style.display = "block";
+
+  const prect = tokEl.getBoundingClientRect();
+  const rect  = pop.getBoundingClientRect();
+  const vw = window.innerWidth, vh = window.innerHeight;
+
+  let left = prect.left;
+  let top  = prect.bottom + 6;
+
+  if (left + rect.width + pad > vw) left = Math.max(vw - rect.width - pad, pad);
+  if (left < pad) left = pad;
+
+  if (top + rect.height + pad > vh){
+    const tryTop = prect.top - rect.height - 6;
+    top = (tryTop >= pad) ? tryTop : Math.max(vh - rect.height - pad, pad);
+  }
+
+  if (vw < 360){ left = Math.max((vw - rect.width)/2, pad); }
+
+  pop.style.left = `${left}px`;
+  pop.style.top  = `${top}px`;
+  pop.style.visibility = "visible";
 }
 
 /* ===== 네이버 링크 ===== */
@@ -295,86 +364,91 @@ function buildNaverSearchUrl(q){ return "https://ja.dict.naver.com/#/search?quer
 const pop=$("#pop"), popLink=$("#popLink"), popSub=$("#popSub"), popDeepl=$("#popDeepl");
 const popKanji=$("#popKanji"), popMsg=$("#popMsg");
 function makeKanjiBox({ch, kr, cls, descText="", dictHref=""}){
-  const box=document.createElement("div"); box.className=`kbox ${cls}`;
+  const box=document.createElement("div");
+  box.className=`kbox ${cls}`;
   let head;
-  if(cls==="learn" && dictHref){ head=document.createElement("a"); head.className="khead link"; head.href=dictHref; head.target="_blank"; head.rel="noopener"; }
-  else{ head=document.createElement("div"); head.className="khead toggle"; }
-  head.textContent=`${ch} · ${kr||""}`; box.appendChild(head);
-  if(cls==="anki" && descText){ const d=document.createElement("div"); d.className="kdesc"; d.textContent=htmlToPlainWithBreaks(descText); box.appendChild(d); head.addEventListener("click",()=>box.classList.toggle("open")); }
+  if (cls==="learn" && dictHref){
+    head=document.createElement("a");
+    head.className="khead link";
+    head.href=dictHref; head.target="_blank"; head.rel="noopener";
+  }else{
+    head=document.createElement("div");
+    head.className="khead toggle";
+  }
+  head.textContent = `${ch} · ${kr||""}`;
+  box.appendChild(head);
+
+  if (cls==="anki" && descText){
+    const desc=document.createElement("div");
+    const txt = htmlToPlainWithBreaks(descText);
+    desc.className="kdesc";
+    desc.textContent = txt;
+    box.appendChild(desc);
+    head.addEventListener("click", ()=>{ box.classList.toggle("open"); });
+  }
   return box;
 }
 async function fillKanjiBoxes(lemma){
-  popKanji.style.display="none"; popKanji.innerHTML=""; popMsg.style.display="none"; popMsg.textContent="";
-  await ensureDbs(); const dbA=ANKI_DB, dbK=KANJI_DB;
-  const uniq=[]; for(const ch of Array.from(lemma)){ if(/[\u4E00-\u9FFF]/.test(ch) && !uniq.includes(ch)) uniq.push(ch); }
+  popKanji.style.display="none"; popKanji.innerHTML="";
+  popMsg.style.display="none";  popMsg.textContent="";
+
+  await ensureDbs();
+  const dbA=ANKI_DB, dbK=KANJI_DB;
+
+  const uniq=[];
+  for(const ch of Array.from(lemma)){
+    if(/[\u4E00-\u9FFF]/.test(ch) && !uniq.includes(ch)) uniq.push(ch);
+  }
+
   let created=0;
   for(const ch of uniq){
-    const aRec=dbA&&dbA[ch]; const kRec=dbK&&dbK[ch];
-    if(aRec){ const hun=aRec["훈"]||"", eum=aRec["음"]||""; let kr=""; if(hun) kr+=hun; if(hun&&eum) kr+=SEP_WIDE; if(eum) kr+=eum;
-      popKanji.appendChild(makeKanjiBox({ch, kr, cls:"anki", descText:aRec["설명"]||""})); created++; continue; }
-    const hun=(kRec&&kRec["훈"])||"", eum=(kRec&&kRec["음"])||""; let kr=""; if(hun) kr+=hun; if(hun&&eum) kr+=SEP_WIDE; if(eum) kr+=eum;
+    const aRec = dbA && dbA[ch];
+    const kRec = dbK && dbK[ch];
+
+    if (aRec){
+      const hun=aRec["훈"]||"", eum=aRec["음"]||"";
+      let kr=""; if(hun) kr+=hun; if(hun&&eum) kr+=SEP_WIDE; if(eum) kr+=eum;
+      const desc = aRec["설명"] || "";
+      popKanji.appendChild(makeKanjiBox({ch, kr, cls:"anki", descText:desc}));
+      created++; continue;
+    }
+
+    const hun=(kRec&&kRec["훈"])||"", eum=(kRec&&kRec["음"])||"";
+    let kr=""; if(hun) kr+=hun; if(hun&&eum) kr+=SEP_WIDE; if(eum) kr+=eum;
     const href="https://hanja.dict.naver.com/#/search?query="+encodeURIComponent(ch);
-    popKanji.appendChild(makeKanjiBox({ch, kr, cls:"learn", dictHref:href})); created++;
+    popKanji.appendChild(makeKanjiBox({ch, kr, cls:"learn", dictHref:href}));
+    created++;
   }
-  if(created>0) popKanji.style.display="flex";
-  const hasAnyKanji=uniq.length>0;
-  if(!created && hasAnyKanji){ popMsg.textContent = KANJI_DB ? "일치하는 한자 항목이 없습니다." : "로컬 사전을 불러오지 못했습니다."; popMsg.style.display="block"; }
+
+  if (created>0) popKanji.style.display="flex";
+  const hasAnyKanji = uniq.length>0;
+  if (!created && hasAnyKanji){
+    popMsg.textContent = KANJI_DB
+      ? "일치하는 한자 항목이 없습니다."
+      : "로컬 사전 파일을 불러오지 못했습니다(kanji_ko_attr_irreg.min.json 경로 확인).";
+    popMsg.style.display="block";
+  } else {
+    popMsg.style.display="none";
+  }
 }
 
-/* ===== 문장 문맥 추출 ===== */
-function sentenceAround(tokens, idx, maxLen=400){
-  if(!tokens||idx<0||idx>=tokens.length) return "";
-  const isEnd=s=>/[。．\.！？!?]/.test(String(s||"")); let L=idx,R=idx;
-  while(L>0 && !isEnd(tokens[L-1].surface)) L--;
-  while(R<tokens.length-1 && !isEnd(tokens[R].surface)) R++;
-  let sent=tokens.slice(L,R+1).map(t=>String(t.surface||"")).join("").replace(/\s+/g,"");
-  if(sent.length>maxLen) sent=sent.slice(0,maxLen);
+/* ===== 문장 문맥 추출(토큰 포함 ‘한 문장’) + 단어만 출력 프롬프트 ===== */
+function sentenceAround(tokens, idx, maxLen = 400){
+  if (!tokens || idx < 0 || idx >= tokens.length) return "";
+  const isEnd = s => /[。．\.！？!?]/.test(String(s||""));
+  let L = idx, R = idx;
+  while (L > 0 && !isEnd(tokens[L-1].surface)) L--;
+  while (R < tokens.length-1 && !isEnd(tokens[R].surface)) R++;
+  let sent = tokens.slice(L, R+1).map(t => String(t.surface||"")).join("").replace(/\s+/g,"");
+  if (sent.length > maxLen) sent = sent.slice(0, maxLen);
   return sent;
 }
 function buildSensePrompt(lemma, sentence=""){
   const ctx = sentence ? `文脈：『${sentence}』` : "";
-  return `次の${ctx? "":""}${ctx}を考慮し、語「${lemma}」の韓国語訳を1語だけ、名詞の基本形で出力してください。句読点や説明は不要です。`;
+  return `次の${ctx? "":"語の"}${ctx}を考慮し、語「${lemma}」の韓国語訳を1語だけ、名詞の基本形で出力してください。句読点や説明は不要です。`;
 }
 
-/* ===== 한국어 단어 후처리(지시문 제거 + 후보 추출 + Fallback) ===== */
-const KO_STOP = new Set(["은","는","이","가","을","를","에","에게","에서","으로","로","와","과","도","만","의","께","까지","부터","다","요","니다"]);
-function cleanInstructionKo(s){
-  let t=String(s||"");
-  // 지시문/문맥 블록 제거
-  t=t.replace(/^[^가-힣]*(다음\s*문맥|문맥|고려하여|명사의\s*기본형|출력|설명|구두점)[^]*$/m,"")
-     .replace(/[\(（]\s*(?:문맥|文脈)[^)]*[\)）]/g,"");
-  // 따옴표/기호 정리
-  t=t.replace(/[「」『』“”'"]/g," ").replace(/[<>]/g," ").replace(/\s+/g," ").trim();
-  return t;
-}
-function extractKoCandidates(s){
-  const t=cleanInstructionKo(s);
-  const words = t.match(/[가-힣]{1,10}/g) || [];
-  return words.filter(w=>!KO_STOP.has(w));
-}
-async function translateWordSmart(lemma, tIdx){
-  const sent = sentenceAround(APP.lastTokens||[], tIdx);
-  const prompt = buildSensePrompt(lemma, sent);
-  try{
-    const r = await callDeepL(preprocessTextForDeepL(prompt), "JA", "KO");
-    const out = r.translation || r.result || r.data || "";
-    const cands = extractKoCandidates(out);
-    const pick = cands.find(w=>w.length>=1 && w.length<=8) || "";
-    if (pick) return pick;
-
-    // Fallback: 문맥 없이 lemma만 번역
-    const r2 = await callDeepL(preprocessTextForDeepL(lemma), "JA", "KO");
-    return (r2.translation || r2.result || r2.data || "").trim();
-  }catch(e){
-    // 실패 시: lemma 단독 번역으로 재시도
-    try{
-      const r2 = await callDeepL(preprocessTextForDeepL(lemma), "JA", "KO");
-      return (r2.translation || r2.result || r2.data || "").trim();
-    }catch{ return ""; }
-  }
-}
-
-/* ===== 팝업(문장 문맥 + 후처리) ===== */
+/* ===== 팝업: 문장 문맥 포함, 단어만 출력(후처리 없음) ===== */
 function openPopBelowToken(tokEl, payload){
   const surface=payload.surface||"", lemma=payload.lemma||surface;
 
@@ -391,9 +465,17 @@ function openPopBelowToken(tokEl, payload){
   popDeepl.textContent="불러오는 중…";
 
   const tIdx = Number(tokEl.dataset.i || -1);
-  translateWordSmart(lemma, tIdx)
-    .then(word=>{ popDeepl.textContent = word || "(결과 없음)"; })
-    .catch(e=>{ popDeepl.textContent = "에러: " + (e?.message ?? String(e)); });
+  const sent = sentenceAround(APP.lastTokens || [], tIdx);
+  const prompt = buildSensePrompt(lemma, sent);
+
+  callDeepL(preprocessTextForDeepL(prompt), "JA", "KO")
+    .then(res=>{
+      const t=res.translation||res.result||res.data||"";
+      popDeepl.textContent=t||"(결과 없음)";
+    })
+    .catch(e=>{
+      popDeepl.textContent="에러: "+(e&&e.message?e.message:String(e));
+    });
 
   fillKanjiBoxes(lemma);
   positionPopupToToken(tokEl);
@@ -407,11 +489,14 @@ async function runBoth(){
   $("#rubyOut").innerHTML="<em style='color:#9fb0c2'>생성 중…</em>";
   $("#transOut").innerHTML="<em style='color:#9fb0c2'>번역 중…</em>";
   try{
-    const [furi, tstr] = await Promise.all([ callFurigana(text), translateByLines(text,"JA","KO") ]);
+    const [furi, tstr] = await Promise.all([
+      callFurigana(text),
+      translateByLines(text,"JA","KO")
+    ]);
     APP.lastTokens=furi.tokens||[]; renderText();
-    $("#transOut").innerHTML = tstr ? escapeHtml(tstr).replace(/\n/g,"<br>") : "<em style='color:#9fb0c2'>결과 없음</em>";
+    $("#transOut").innerHTML=tstr?escapeHtml(tstr).replace(/\n/g,"<br>"):"<em style='color:#9fb0c2'>결과 없음</em>";
   }catch(e){
-    $("#rubyOut").innerHTML='<span class="error">에러(후리가나): '+escapeHtml(e?.message||String(e))+'</span>';
+    $("#rubyOut").innerHTML='<span class="error">에러(후리가나): '+escapeHtml(e&&e.message?e.message:String(e))+'</span>';
     $("#transOut").innerHTML="";
   }
 }
