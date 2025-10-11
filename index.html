@@ -145,6 +145,15 @@ function withTimeout(run,ms=45000,label="요청"){
   return Promise.race([run(ctrl.signal),(async()=>{await new Promise(r=>setTimeout(r,ms+50));throw new Error(label+" 타임아웃("+ms+"ms)");})()]).finally(()=>clearTimeout(t));
 }
 const SEP_WIDE=" ";
+function pickSingleQuoted(s){
+  const str = String(s ?? "");
+  // '…' 우선 추출
+  const m = str.match(/'([^']+)'/);
+  if (m) return m[1].trim();
+  // 예비: ‘…’ / “…” / 「…」 / 『…』
+  const m2 = str.match(/[‘']([^’']+)[’']|[“"]([^”"]+)[”"]|「([^」]+)」|『([^』]+)』/);
+  return (m2 && (m2[1]||m2[2]||m2[3]||m2[4]) || "").trim();
+}
 
 /* ===== DeepL 전처리: 반복 축약 + 이모지 제거 ===== */
 const EMOJI_RE = /[\u{1F1E6}-\u{1F1FF}\u{1F300}-\u{1F5FF}\u{1F600}-\u{1F64F}\u{1F680}-\u{1F6FF}\u{1F700}-\u{1F77F}\u{1F780}-\u{1F7FF}\u{1F800}-\u{1F8FF}\u{1F900}-\u{1F9FF}\u{1FA00}-\u{1FAFF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu;
@@ -469,13 +478,26 @@ function openPopBelowToken(tokEl, payload){
   const prompt = buildSensePrompt(lemma, sent);
 
   callDeepL(preprocessTextForDeepL(prompt), "JA", "KO")
-    .then(res=>{
-      const t=res.translation||res.result||res.data||"";
-      popDeepl.textContent=t||"(결과 없음)";
+    .then(async res=>{
+      let t = res.translation || res.result || res.data || "";
+      const only = pickSingleQuoted(t);
+      if (only) {
+        popDeepl.textContent = only;
+        return;
+      }
+      // 따옴표가 전혀 없고 지시문만 번역된 경우 대비: lemma만 재요청
+      if (/문맥|출력|기본형|설명|구두점/.test(t)) {
+        try{
+          const r2 = await callDeepL(preprocessTextForDeepL(lemma), "JA", "KO");
+          t = r2.translation || r2.result || r2.data || "";
+        }catch{}
+      }
+      popDeepl.textContent = t || "(결과 없음)";
     })
-    .catch(e=>{
-      popDeepl.textContent="에러: "+(e&&e.message?e.message:String(e));
-    });
+  .catch(e=>{
+    popDeepl.textContent = "에러: " + (e?.message ?? String(e));
+  });
+
 
   fillKanjiBoxes(lemma);
   positionPopupToToken(tokEl);
