@@ -127,8 +127,8 @@ function escapeAttr(s){ return String(s).replace(/&/g,"&amp;").replace(/"/g,"&qu
 function kata2hira(s){ return s.replace(/[\u30a1-\u30f6]/g, ch=>String.fromCharCode(ch.charCodeAt(0)-0x60)); }
 function hasKanji(s){ return /[\u4E00-\u9FFF]/.test(s); }
 function htmlToPlainWithBreaks(html){
-  const tmp=document.createElement("div");
-  tmp.innerHTML=String(html||"");
+  if(!html) return "";
+  const tmp=document.createElement("div"); tmp.innerHTML=String(html||"");
   return (tmp.textContent||tmp.innerText||"").replace(/\r\n/g,"\n").replace(/\n{3,}/g,"\n\n").trim();
 }
 function stripHtml(s){ const tmp=document.createElement("div"); tmp.innerHTML=String(s||""); return (tmp.textContent||tmp.innerText||"").trim(); }
@@ -139,7 +139,7 @@ function withTimeout(run,ms=45000,label="요청"){
 const SEP_WIDE=" ";
 
 /* ===== DeepL 전처리 ===== */
-const EMOJI_RE = /[\u{1F1E6}-\u{1F1FF}\u{1F300}-\u{1F5FF}\u{1F600}-\u{1F64F}\u{1F680}-\u{1F6FF}\u{1F700}-\u{1F77F}\u{1F780}-\u{1F7FF}\u{1F800}-\u{1F8FF}\u{1F900}-\u{1F9FF}\u{1FA00}-\u{1FAFF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu;
+const EMOJI_RE=/[\u{1F1E6}-\u{1F1FF}\u{1F300}-\u{1F5FF}\u{1F600}-\u{1F64F}\u{1F680}-\u{1F6FF}\u{1F700}-\u{1F77F}\u{1F780}-\u{1F7FF}\u{1F800}-\u{1F8FF}\u{1F900}-\u{1F9FF}\u{1FA00}-\u{1FAFF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu;
 function compressRepeats(s){ return s.replace(/([ぁ-んァ-ン一-龯A-Za-zーｗW！？!?])\1{2,}/gu,'$1$1'); }
 function preprocessTextForDeepL(s){
   if(!s) return s;
@@ -163,8 +163,8 @@ async function callDeepL(text,src="JA",tgt="KO"){
   return withTimeout(fetcher,45000,"DeepL");
 }
 
-/* ===== 줄 단위 번역 ===== */
-function splitLineSafely(line, maxLen = 3000){
+/* ===== 번역(줄 단위) ===== */
+function splitLineSafely(line, maxLen=3000){
   const out=[]; if(line.length<=maxLen){out.push(line);return out;}
   const segs=line.split(/(?<=[。．\.！？!?；;：:])/); let buf="";
   for(const s of segs){
@@ -328,30 +328,27 @@ function sentenceAround(tokens, idx, maxLen=400){
   if(sent.length>maxLen) sent=sent.slice(0,maxLen);
   return sent;
 }
+function buildSensePrompt(lemma, sentence=""){
+  const ctx = sentence ? `文脈：『${sentence}』` : "";
+  return `次の${ctx? "":""}${ctx}を考慮し、語「${lemma}」の韓国語訳を1語だけ、名詞の基本形で出力してください。句読点や説明は不要です。`;
+}
 
-/* ===== 따옴표 추출: 두 번째 것만 사용 ===== */
+/* ===== 두 번째 따옴표만 추출 ===== */
 function pickQuotedSecond(s){
-  const t = String(s ?? "");
-  const collect = (re) => { const out=[]; let m; while((m=re.exec(t))!==null){ const g=m[1]; if(g && g.trim()) out.push(g.trim()); } return out; };
-  // 1) '…'
-  let arr = collect(/'([^']+)'/g);
-  if (arr.length >= 2) return arr[1];
-  // 2) ‘…’
-  arr = collect(/‘([^’]+)’/g);
-  if (arr.length >= 2) return arr[1];
-  // 3) 「…」
-  arr = collect(/「([^」]+)」/g);
-  if (arr.length >= 2) return arr[1];
-  // 4) 『…』
-  arr = collect(/『([^』]+)』/g);
-  if (arr.length >= 2) return arr[1];
-  // 5) “…”
-  arr = collect(/“([^”]+)”/g);
-  if (arr.length >= 2) return arr[1];
+  const t=String(s??"");
+  const collect = (re)=>{ const out=[]; let m; while((m=re.exec(t))!==null){ const g=m[1]?.trim(); if(g) out.push(g); } return out; };
+  const q1=collect(/'([^']+)'/g);   if(q1.length>=2) return q1[1];
+  const q2=collect(/‘([^’]+)’/g);   if(q2.length>=2) return q2[1];
+  const q3=collect(/「([^」]+)」/g); if(q3.length>=2) return q3[1];
+  const q4=collect(/『([^』]+)』/g); if(q4.length>=2) return q4[1];
+  const q5=collect(/“([^”]+)”/g);   if(q5.length>=2) return q5[1];
   return "";
 }
 
 /* ===== 팝업 ===== */
+const pop=$("#pop"), popLink=$("#popLink"), popSub=$("#popSub"), popDeepl=$("#popDeepl");
+const popKanji=$("#popKanji"), popMsg=$("#popMsg");
+
 function openPopBelowToken(tokEl, payload){
   const surface=payload.surface||"", lemma=payload.lemma||surface;
 
@@ -369,15 +366,14 @@ function openPopBelowToken(tokEl, payload){
 
   const tIdx = Number(tokEl.dataset.i || -1);
   const sent = sentenceAround(APP.lastTokens || [], tIdx);
-  const prompt = `次の文脈：『${sent}』を考慮し、語「${lemma}」の韓国語訳を1語だけ、名詞の基本形で'이곳'に入れて出力してください：'문맥', '${lemma}', '이곳'。`;
+  const prompt = buildSensePrompt(lemma, sent);
 
   callDeepL(preprocessTextForDeepL(prompt), "JA", "KO")
     .then(async res=>{
       let raw = res.translation || res.result || res.data || "";
-      let picked = pickQuotedSecond(raw);   // ★ 두 번째 따옴표만 사용
-
-      // 없으면 lemma 단독 재시도
+      let picked = pickQuotedSecond(raw);        // ← 오직 두 번째만
       if(!picked){
+        // 따옴표 2개가 없으면, 지시문 번역으로 간주하고 lemma 단독 번역
         try{
           const r2 = await callDeepL(preprocessTextForDeepL(lemma), "JA", "KO");
           raw = r2.translation || r2.result || r2.data || "";
@@ -411,7 +407,7 @@ async function runBoth(){
   }
 }
 
-/* ===== 바인딩 ===== */
+/* ===== 바인딩(중복 방지) ===== */
 (function bindOnce(){
   if(window.__BOUND__) return; window.__BOUND__=true;
   $("#runBtn").addEventListener("click",runBoth);
