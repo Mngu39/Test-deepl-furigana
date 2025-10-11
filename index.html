@@ -44,7 +44,7 @@
   details[open] .chev{transform:rotate(90deg)}
   .hint{margin-left:auto;color:#9fb0c2;font-size:12px}
 
-  /* 팝업: 모바일 잘림 방지 */
+  /* 팝업 */
   #pop{
     position:fixed; z-index:9999;
     max-width:min(92vw,520px);
@@ -53,9 +53,7 @@
     background:var(--card); border:1px solid var(--line);
     border-radius:14px; padding:14px; display:none;
   }
-  @supports (height: 1dvh){
-    #pop{ max-height:80dvh; }
-  }
+  @supports (height: 1dvh){ #pop{ max-height:80dvh; } }
   .popTitle{font-size:22px;font-weight:800;line-height:1.2;display:inline-block;color:#e6edf3;text-decoration:none}
   .popTitle rt{font-size:.7em}
   .popSub{font-size:12px;color:#9fb0c2;margin-left:6px}
@@ -68,16 +66,10 @@
   .kbox{border:1px solid var(--line);border-radius:12px;padding:8px 10px}
   .kbox.anki{background:var(--anki-bg);color:var(--anki-ink);border-color:var(--anki-border)}
   .kbox.learn{background:var(--learn-bg);color:var(--learn-ink);border-color:var(--learn-border)}
-
-  /* 헤더: Anki=토글, Learn=링크 */
-  .khead{display:flex;align-items:center;gap:8px;font-size:14px;font-weight:700;background:transparent;border:0;padding:0;border-radius:0}
+  .khead{display:flex;align-items:center;gap:8px;font-size:14px;font-weight:700;background:transparent;border:0;padding:0}
   .khead.toggle{cursor:pointer}
   .khead.link{cursor:pointer;text-decoration:none;color:inherit}
-  .khead.link:hover{filter:brightness(1.08)}
-
-  /* 설명: 같은 박스 내부에서만 펼침 */
-  .kdesc{display:none;margin-top:6px;font-size:13px;line-height:1.5;white-space:pre-wrap;
-         border-top:1px dashed rgba(255,255,255,.12); padding-top:6px}
+  .kdesc{display:none;margin-top:6px;font-size:13px;line-height:1.5;white-space:pre-wrap;border-top:1px dashed rgba(255,255,255,.12); padding-top:6px}
   .kbox.open .kdesc{display:block}
 </style>
 </head>
@@ -119,9 +111,7 @@
   <span id="popSub" class="popSub"></span>
   <div id="popDeepl" class="popTrans"></div>
 
-  <!-- 순서를 유지하는 ‘단일’ 리스트 -->
   <div id="popKanji" class="kanjiList" style="display:none"></div>
-
   <div id="popMsg" class="popMsg" style="display:none"></div>
   <div class="popActions"><button class="btn" id="popClose" type="button">닫기</button></div>
 </div>
@@ -164,11 +154,33 @@ function compressRepeats(s){
 function preprocessTextForDeepL(s){
   if(!s) return s;
   return compressRepeats(
-    s.replace(/\u200D/g,'')                 // ZWJ
-     .replace(/[\uFE0E\uFE0F]/g,'')         // variation selectors
-     .replace(/[\u{1F3FB}-\u{1F3FF}]/gu,'')  // skin tones
-     .replace(EMOJI_RE,'')                  // emojis
+    s.replace(/\u200D|\u200C/g,'')         // ZWJ/ZWNJ
+     .replace(/[\uFE0E\uFE0F]/g,'')        // variation selectors
+     .replace(/[\u{1F3FB}-\u{1F3FF}]/gu,'') // skin tones
+     .replace(EMOJI_RE,'')                 // emojis
   );
+}
+
+/* ===== “꼬리 정리: 첫 기호만 보존” ===== */
+// 실질 문자: 영숫자/히라/가타/한자
+const CORE_RE = /[A-Za-z0-9\u3040-\u30FF\u4E00-\u9FFF]/;
+// 기호 후보(첫 글자만 사용할 것) - 필요시 추가 가능
+const SYMBOL_RE = /[。．\.、，,・…〜～!！?？‼‽:：;；「」『』（）()［］\[\]◎★☆♪※•]/;
+
+function normalizeTailKeepFirstSymbol(line){
+  if(!line) return line;
+  let s = line.replace(/\s+$/,''); // 뒤 공백 제거
+  // 마지막 실질 문자 찾기
+  let i = s.length - 1;
+  while(i >= 0 && !CORE_RE.test(s[i])) i--;
+  if(i < 0){
+    // 실질 문자가 전혀 없으면 첫 기호만 반환(없으면 빈 문자열)
+    const m = s.match(SYMBOL_RE);
+    return m ? m[0] : "";
+  }
+  const tail = s.slice(i+1);
+  const m = tail.match(SYMBOL_RE);  // 꼬리에서 첫 기호
+  return s.slice(0, i+1) + (m ? m[0] : "");
 }
 
 /* ===== API ===== */
@@ -185,41 +197,47 @@ async function callDeepL(text,src="JA",tgt="KO"){
   return withTimeout(fetcher,45000,"DeepL");
 }
 
-/* ===== DeepL 스마트 번역 ===== */
+/* ===== 분할 유틸 (긴 줄 보호) ===== */
 function splitForTranslate(text, maxLen = 3000){
-  const parts = []; let buf = "";
-  const segs = String(text).split(/(?<=[。！？!?]|[\r\n]+)/);
+  const parts=[]; let buf="";
+  const segs=String(text).split(/(?<=[\r\n]+)/); // 우선 줄 단위
   for(const s of segs){
-    if ((buf + s).length > maxLen){
-      if (buf) parts.push(buf);
-      if (s.length > maxLen){
-        for (let i=0;i<s.length;i+=maxLen) parts.push(s.slice(i, i+maxLen));
-        buf = "";
-      } else { buf = s; }
-    } else { buf += s; }
+    if((buf+s).length>maxLen){
+      if(buf) parts.push(buf);
+      if(s.length>maxLen){
+        for(let i=0;i<s.length;i+=maxLen) parts.push(s.slice(i,i+maxLen));
+        buf="";
+      }else{ buf=s; }
+    }else{ buf+=s; }
   }
-  if (buf) parts.push(buf);
+  if(buf) parts.push(buf);
   return parts;
 }
+
+/* ===== 줄 단위 번역(첫 기호 보존 적용) ===== */
 async function translateSmart(text, src="JA", tgt="KO"){
-  const cleaned = preprocessTextForDeepL(text);   /* 전처리 적용 */
-  const chunks = splitForTranslate(cleaned);
-  const out = [];
-  for (const [i,chunk] of chunks.entries()){
-    let tries=0;
-    while(tries<2){
+  const cleaned = preprocessTextForDeepL(text);
+  const chunks  = splitForTranslate(cleaned, 3000);
+  const out=[];
+  for(const [i,chunk] of chunks.entries()){
+    // 각 청크를 다시 줄 단위로 쪼개 처리(빈 줄 유지)
+    const lines = String(chunk).split(/\r?\n/);
+    const lineOut=[];
+    for(const line of lines){
+      if(!line.trim()){ lineOut.push(""); continue; }
+      const ready = normalizeTailKeepFirstSymbol(line);
+      let resText = ready;
       try{
-        const r = await callDeepL(chunk, src, tgt);
-        const t = r.translation || r.result || r.data || "";
-        out.push(t || chunk);
-        break;
-      }catch(e){
-        tries++; if (tries>=2) out.push(`(번역 실패) ${chunk}`);
-        await new Promise(r=>setTimeout(r, 300+200*i));
-      }
+        const r = await callDeepL(ready, src, tgt);
+        resText = r.translation || r.result || r.data || ready;
+      }catch{}
+      lineOut.push(resText);
+      await new Promise(r=>setTimeout(r,220));
     }
+    out.push(lineOut.join("\n"));
+    await new Promise(r=>setTimeout(r, 60 + i*20));
   }
-  return out.join("\n");
+  return out.join("");
 }
 
 /* ===== DB 로드 ===== */
@@ -337,7 +355,7 @@ function getLemmaReading(lemma){
   }).catch(()=>{ lemmaReadCache.set(lemma,""); return ""; });
 }
 
-/* ===== 팝업 위치: 토큰 바로 아래(잘리면 좌/우·필요시 위) ===== */
+/* ===== 팝업 위치 ===== */
 function positionPopupToToken(tokEl){
   const pad = 8;
   pop.style.visibility = "hidden";
@@ -367,15 +385,13 @@ function positionPopupToToken(tokEl){
   pop.style.visibility = "visible";
 }
 
-/* ===== 팝업: 단일 리스트(순서 유지) ===== */
+/* ===== 팝업 구성 ===== */
 const pop=$("#pop"), popLink=$("#popLink"), popSub=$("#popSub"), popDeepl=$("#popDeepl");
 const popKanji=$("#popKanji"), popMsg=$("#popMsg");
-
 function buildNaverSearchUrl(q){ return "https://ja.dict.naver.com/#/search?query="+encodeURIComponent(q||""); }
 
 function makeKanjiBox({ch, kr, cls, descText="", dictHref=""}){
-  const box=document.createElement("div");
-  box.className=`kbox ${cls}`;
+  const box=document.createElement("div"); box.className=`kbox ${cls}`;
   let head;
   if (cls==="learn" && dictHref){
     head=document.createElement("a");
@@ -385,15 +401,14 @@ function makeKanjiBox({ch, kr, cls, descText="", dictHref=""}){
     head=document.createElement("div");
     head.className="khead toggle";
   }
-  head.textContent = `${ch} · ${kr||""}`;
-  box.appendChild(head);
+  head.textContent=`${ch} · ${kr||""}`; box.appendChild(head);
 
   if (cls==="anki" && descText){
     const desc=document.createElement("div");
     desc.className="kdesc";
-    desc.textContent = descText;
+    desc.textContent=htmlToPlainWithBreaks(descText);
     box.appendChild(desc);
-    head.addEventListener("click", ()=>{ box.classList.toggle("open"); });
+    head.addEventListener("click",()=>box.classList.toggle("open"));
   }
   return box;
 }
