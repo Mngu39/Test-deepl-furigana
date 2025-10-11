@@ -146,7 +146,7 @@ function withTimeout(run,ms=45000,label="요청"){
 }
 const SEP_WIDE=" ";
 
-/* ===== DeepL 전처리: 반복 축약 + 이모지 제거 ===== */
+/* ===== DeepL 전처리: 반복 축약 + 이모지 제거(유지) ===== */
 const EMOJI_RE = /[\u{1F1E6}-\u{1F1FF}\u{1F300}-\u{1F5FF}\u{1F600}-\u{1F64F}\u{1F680}-\u{1F6FF}\u{1F700}-\u{1F77F}\u{1F780}-\u{1F7FF}\u{1F800}-\u{1F8FF}\u{1F900}-\u{1F9FF}\u{1FA00}-\u{1FAFF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu;
 function compressRepeats(s){
   return s.replace(/([ぁ-んァ-ン一-龯A-Za-zーｗW！？!?])\1{2,}/gu, '$1$1');
@@ -161,20 +161,71 @@ function preprocessTextForDeepL(s){
   );
 }
 
-/* ===== 꼬리 처리: 요청만 정리, 출력은 원본 유지 ===== */
-/* 실질 문자: 영숫자/히라/가타/한자 */
-const CORE_RE   = /[A-Za-z0-9\u3040-\u30FF\u4E00-\u9FFF]/;
-/* 기호 후보(DeepL 요청 시 꼬리에서 ‘첫 1개’만 보존) */
-const SYMBOL_RE = /[。．\.、，,・…〜～!！?？‼‽:：;；「」『』（）()［］\[\]◎★☆♪※•]/;
+/* ===== 아이폰/문자: !? 이모지 정규화 ===== */
+function normalizePunctEmojis(s){
+  if(!s) return s;
+  return s
+    .replace(/\u2757/g,'!')   // ❗
+    .replace(/\u2755/g,'!')   // ❕
+    .replace(/\u2753/g,'?')   // ❓
+    .replace(/\u2754/g,'?')   // ❔
+    .replace(/\u203C/g,'!!')  // ‼
+    .replace(/\u2049/g,'!?')  // ⁉
+    .replace(/\u203D/g,'?!'); // ‽
+}
 
-/* line -> { core: 마지막 실질문자까지, tail: 그 뒤 원본 꼬리 전체 } */
+/* ===== 꼬리 정리(요청에만 적용) ===== */
+/* 실질문자: ASCII/전각 영숫자, 히라, 가타(전각+반각), 한자 (작은 ぁ/っ/ょ 포함) */
+const CORE_RE =
+  /[A-Za-z0-9\uFF10-\uFF19\uFF21-\uFF3A\uFF41-\uFF5A\u3040-\u309F\u30A0-\u30FF\uFF65-\uFF9F\u4E00-\u9FFF]/;
+
+/* 심볼 검출(첫 기호 찾기용): 전각/반각 온점·중점·쉼표·말줄임 등 포함 */
+const SYMBOL_RE =
+  /[。．\.、，,・･…‥⋯︙︰!！?？:：;；「」『』（）()［］\[\]｢｣◎★☆♪※•]/;
+
+/* dotlike 분류(… 제외): 최대 3개 보존 */
+const DOTLIKE_SET = new Set([
+  '.', '．', '。', '・', '･', '‥', '⋯', '︙', '︰'
+]);
+
 function splitCoreAndTail(line){
   if(!line) return {core:"", tail:""};
   let s = line.replace(/\s+$/,''); // 뒤 공백 제거
   let i = s.length - 1;
   while (i >= 0 && !CORE_RE.test(s[i])) i--;
-  if (i < 0) return {core:"", tail:s}; // 전부 기호/이모지뿐인 줄
+  if (i < 0) return {core:"", tail:s}; // 전부 기호/이모지뿐
   return {core:s.slice(0, i+1), tail:s.slice(i+1)};
+}
+function makeRequestTail(tail){
+  if(!tail) return '';
+  const idx = tail.search(SYMBOL_RE);
+  if (idx === -1) return '';
+
+  const head = tail[idx];                   // 첫 기호는 그대로
+  let extras = '';
+  let seenEx = false, seenQ = false;
+  let cntEllipsis = 0;  // ‘…’ 전용: 최대 1
+  let cntDotlike = 0;   // DOTLIKE_SET: 최대 3
+
+  const rest = tail.slice(idx+1);
+  for (const ch of rest){
+    // ! / ? (전각/반각) — 각 1개만 추가
+    if (!seenEx && (ch === '!' || ch === '！')) { extras += ch; seenEx = true; continue; }
+    if (!seenQ && (ch === '?' || ch === '？')) { extras += ch; seenQ = true; continue; }
+
+    // ‘…’(U+2026) — 최대 1개
+    if (ch === '…') {
+      if (cntEllipsis < 1) { extras += ch; cntEllipsis++; }
+      continue;
+    }
+    // dotlike — 최대 3개 (원문 문자 그대로 유지)
+    if (DOTLIKE_SET.has(ch)) {
+      if (cntDotlike < 3) { extras += ch; cntDotlike++; }
+      continue;
+    }
+    // 그 외 기호는 무시
+  }
+  return head + extras;
 }
 
 /* ===== API ===== */
@@ -191,10 +242,10 @@ async function callDeepL(text,src="JA",tgt="KO"){
   return withTimeout(fetcher,45000,"DeepL");
 }
 
-/* ===== 분할 유틸 (긴 줄 보호: 우선 줄 단위) ===== */
+/* ===== 분할(긴 텍스트 보호: 줄 단위 우선) ===== */
 function splitForTranslate(text, maxLen = 3000){
   const parts=[]; let buf="";
-  const segs=String(text).split(/(?<=[\r\n]+)/); // 줄 단위 우선
+  const segs=String(text).split(/(?<=[\r\n]+)/); // 줄 단위
   for(const s of segs){
     if((buf+s).length>maxLen){
       if(buf) parts.push(buf);
@@ -208,10 +259,15 @@ function splitForTranslate(text, maxLen = 3000){
   return parts;
 }
 
-/* ===== 줄 단위 번역 (요청: 첫 기호 1개 보존 / 출력: 원 꼬리 유지) ===== */
+/* ===== 번역(줄 단위): 요청에만 꼬리 정리 ===== */
 async function translateSmart(text, src="JA", tgt="KO"){
-  const cleaned = preprocessTextForDeepL(text);
-  const chunks  = splitForTranslate(cleaned, 3000);
+  // 1) 느낌표/물음표 이모지 → !/? 정규화
+  const normalized = normalizePunctEmojis(text);
+  // 2) 일반 전처리(반복 축약, 이모지 제거 등)
+  const cleaned    = preprocessTextForDeepL(normalized);
+  // 3) 길이 분할(줄 우선)
+  const chunks     = splitForTranslate(cleaned, 3000);
+
   const out=[];
   for(const [i,chunk] of chunks.entries()){
     const lines = String(chunk).split(/\r?\n/);
@@ -219,24 +275,21 @@ async function translateSmart(text, src="JA", tgt="KO"){
     for(const line of lines){
       if(!line.trim()){ lineOut.push(""); continue; }
 
-      // ★ 꼬리 분리 → 요청용 첫 기호만 선택
       const { core, tail } = splitCoreAndTail(line);
-      const firstSym = (tail.match(SYMBOL_RE) || [""])[0];
-      const ready    = core + firstSym; // DeepL로 보낼 텍스트
+      const reqTail = makeRequestTail(tail);   // ★ 규칙 적용
+      const ready   = core + reqTail;
 
       let resText = ready;
       try{
         const r = await callDeepL(ready, src, tgt);
         resText = r.translation || r.result || r.data || ready;
       }catch{}
+      lineOut.push(resText);
 
-      // ★ 출력에는 원 꼬리(tail)를 그대로 덧붙임
-      lineOut.push(resText + tail);
-
-      await new Promise(r=>setTimeout(r,220));
+      await new Promise(r=>setTimeout(r,200));
     }
     out.push(lineOut.join("\n"));
-    await new Promise(r=>setTimeout(r, 60 + i*20));
+    await new Promise(r=>setTimeout(r, 50 + i*20));
   }
   return out.join("");
 }
@@ -322,7 +375,7 @@ const APP=(function(){ if(!window.__APP__) window.__APP__={lastTokens:null,rubyO
 function buildRubyTokens(tokens){
   return (tokens||[]).map((t,idx)=>{
     const s=String(t.surface||"");
-       const r=String(t.reading||"");
+    const r=String(t.reading||"");
     const lemma=String(t.lemma||s);
     const rt=r?kata2hira(r):"";
     const inner=(hasKanji(s)&&rt)
@@ -473,7 +526,8 @@ function openPopBelowToken(tokEl, payload){
   }
 
   popDeepl.textContent="불러오는 중…";
-  callDeepL(preprocessTextForDeepL(lemma),"JA","KO").then(res=>{
+  // lemma에도 !?/이모지 정규화 후 전처리 적용
+  callDeepL(preprocessTextForDeepL(normalizePunctEmojis(lemma)),"JA","KO").then(res=>{
     const t=res.translation||res.result||res.data||"";
     popDeepl.textContent=t||"(결과 없음)";
   }).catch(e=>{ popDeepl.textContent="에러: "+(e&&e.message?e.message:String(e)); });
