@@ -1,4 +1,4 @@
-  <!doctype html>
+<!doctype html>
 <html lang="ko">
 <head>
 <meta charset="utf-8" />
@@ -357,11 +357,12 @@ function positionPopupToToken(tokEl){
   pop.style.visibility = "visible";
 }
 
-/* ===== 팝업 구성 ===== */
-const pop=$("#pop"), popLink=$("#popLink"), popSub=$("#popSub"), popDeepl=$("#popDeepl");
-const popKanji=$("#popKanji"), popMsg=$("#popMsg");
+/* ===== 네이버 링크 ===== */
 function buildNaverSearchUrl(q){ return "https://ja.dict.naver.com/#/search?query="+encodeURIComponent(q||""); }
 
+/* ===== 한자 박스 ===== */
+const pop=$("#pop"), popLink=$("#popLink"), popSub=$("#popSub"), popDeepl=$("#popDeepl");
+const popKanji=$("#popKanji"), popMsg=$("#popMsg");
 function makeKanjiBox({ch, kr, cls, descText="", dictHref=""}){
   const box=document.createElement("div");
   box.className=`kbox ${cls}`;
@@ -379,8 +380,9 @@ function makeKanjiBox({ch, kr, cls, descText="", dictHref=""}){
 
   if (cls==="anki" && descText){
     const desc=document.createElement("div");
+    const txt = htmlToPlainWithBreaks(descText);
     desc.className="kdesc";
-    desc.textContent = descText;
+    desc.textContent = txt;
     box.appendChild(desc);
     head.addEventListener("click", ()=>{ box.classList.toggle("open"); });
   }
@@ -406,7 +408,7 @@ async function fillKanjiBoxes(lemma){
     if (aRec){
       const hun=aRec["훈"]||"", eum=aRec["음"]||"";
       let kr=""; if(hun) kr+=hun; if(hun&&eum) kr+=SEP_WIDE; if(eum) kr+=eum;
-      const desc = aRec["설명"] ? htmlToPlainWithBreaks(aRec["설명"]) : "";
+      const desc = aRec["설명"] || "";
       popKanji.appendChild(makeKanjiBox({ch, kr, cls:"anki", descText:desc}));
       created++; continue;
     }
@@ -430,30 +432,23 @@ async function fillKanjiBoxes(lemma){
   }
 }
 
-/* ===== 짧은 항목 번역: 문맥 보강 ===== */
-function contextAround(tokens, idx, leftChars = 12, rightChars = 12){
-  if (!tokens || idx<0 || idx>=tokens.length) return "";
-  const isBreak = s => /[。．\.！？!?]/.test(s);
-  let left = "";
-  for (let i=idx-1; i>=0; i--){
-    const s = String(tokens[i].surface||""); if (isBreak(s)) break;
-    left = s + left; if (left.length >= leftChars){ left = left.slice(-leftChars); break; }
-  }
-  let right = "";
-  for (let j=idx+1; j<tokens.length; j++){
-    const s = String(tokens[j].surface||""); if (isBreak(s)) break;
-    right += s; if (right.length >= rightChars){ right = right.slice(0,rightChars); break; }
-  }
-  return (left + "□" + right).replace(/\s+/g,"");
+/* ===== 문장 문맥 추출(토큰 포함 ‘한 문장’) + 단어만 출력 프롬프트 ===== */
+function sentenceAround(tokens, idx, maxLen = 400){
+  if (!tokens || idx < 0 || idx >= tokens.length) return "";
+  const isEnd = s => /[。．\.！？!?]/.test(String(s||""));
+  let L = idx, R = idx;
+  while (L > 0 && !isEnd(tokens[L-1].surface)) L--;
+  while (R < tokens.length-1 && !isEnd(tokens[R].surface)) R++;
+  let sent = tokens.slice(L, R+1).map(t => String(t.surface||"")).join("").replace(/\s+/g,"");
+  if (sent.length > maxLen) sent = sent.slice(0, maxLen);
+  return sent;
 }
-function isVeryShortLemma(lemma){
-  const s = String(lemma||"");
-  if (s.length <= 1) return true;
-  if (s.length <= 2 && /[\u4E00-\u9FFF]/.test(s)) return true;
-  return false;
+function buildSensePrompt(lemma, sentence=""){
+  const ctx = sentence ? `文脈：『${sentence}』` : "";
+  return `次の${ctx? "":"語の"}${ctx}を考慮し、語「${lemma}」の韓国語訳を1語だけ、名詞の基本形で出力してください。句読点や説明は不要です。`;
 }
 
-/* ===== 팝업 오픈/닫기 ===== */
+/* ===== 팝업: 문장 문맥 포함, 단어만 출력(후처리 없음) ===== */
 function openPopBelowToken(tokEl, payload){
   const surface=payload.surface||"", lemma=payload.lemma||surface;
 
@@ -469,21 +464,13 @@ function openPopBelowToken(tokEl, payload){
 
   popDeepl.textContent="불러오는 중…";
 
-  let textForDeepL = lemma;
   const tIdx = Number(tokEl.dataset.i || -1);
-  if (isVeryShortLemma(lemma)){
-    const ctx = contextAround(APP.lastTokens||[], tIdx);
-    if (ctx.trim()){
-      textForDeepL = `${lemma}（文脈:${ctx}）`;
-    }
-  }
+  const sent = sentenceAround(APP.lastTokens || [], tIdx);
+  const prompt = buildSensePrompt(lemma, sent);
 
-  callDeepL(preprocessTextForDeepL(textForDeepL),"JA","KO")
+  callDeepL(preprocessTextForDeepL(prompt), "JA", "KO")
     .then(res=>{
-      let t=res.translation||res.result||res.data||"";
-      if (isVeryShortLemma(lemma)) {
-        t = t.replace(/[\s\u00A0]*[\(（]\s*(?:문맥|文脈)\s*:\s*.*?[\)）]/g, "").trim();
-      }
+      const t=res.translation||res.result||res.data||"";
       popDeepl.textContent=t||"(결과 없음)";
     })
     .catch(e=>{
@@ -504,7 +491,7 @@ async function runBoth(){
   try{
     const [furi, tstr] = await Promise.all([
       callFurigana(text),
-      translateByLines(text,"JA","KO")   // 줄단위 번역
+      translateByLines(text,"JA","KO")
     ]);
     APP.lastTokens=furi.tokens||[]; renderText();
     $("#transOut").innerHTML=tstr?escapeHtml(tstr).replace(/\n/g,"<br>"):"<em style='color:#9fb0c2'>결과 없음</em>";
