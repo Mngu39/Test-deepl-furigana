@@ -161,26 +161,20 @@ function preprocessTextForDeepL(s){
   );
 }
 
-/* ===== “꼬리 정리: 첫 기호만 보존” ===== */
-// 실질 문자: 영숫자/히라/가타/한자
-const CORE_RE = /[A-Za-z0-9\u3040-\u30FF\u4E00-\u9FFF]/;
-// 기호 후보(첫 글자만 사용할 것) - 필요시 추가 가능
+/* ===== 꼬리 처리: 요청만 정리, 출력은 원본 유지 ===== */
+/* 실질 문자: 영숫자/히라/가타/한자 */
+const CORE_RE   = /[A-Za-z0-9\u3040-\u30FF\u4E00-\u9FFF]/;
+/* 기호 후보(DeepL 요청 시 꼬리에서 ‘첫 1개’만 보존) */
 const SYMBOL_RE = /[。．\.、，,・…〜～!！?？‼‽:：;；「」『』（）()［］\[\]◎★☆♪※•]/;
 
-function normalizeTailKeepFirstSymbol(line){
-  if(!line) return line;
+/* line -> { core: 마지막 실질문자까지, tail: 그 뒤 원본 꼬리 전체 } */
+function splitCoreAndTail(line){
+  if(!line) return {core:"", tail:""};
   let s = line.replace(/\s+$/,''); // 뒤 공백 제거
-  // 마지막 실질 문자 찾기
   let i = s.length - 1;
-  while(i >= 0 && !CORE_RE.test(s[i])) i--;
-  if(i < 0){
-    // 실질 문자가 전혀 없으면 첫 기호만 반환(없으면 빈 문자열)
-    const m = s.match(SYMBOL_RE);
-    return m ? m[0] : "";
-  }
-  const tail = s.slice(i+1);
-  const m = tail.match(SYMBOL_RE);  // 꼬리에서 첫 기호
-  return s.slice(0, i+1) + (m ? m[0] : "");
+  while (i >= 0 && !CORE_RE.test(s[i])) i--;
+  if (i < 0) return {core:"", tail:s}; // 전부 기호/이모지뿐인 줄
+  return {core:s.slice(0, i+1), tail:s.slice(i+1)};
 }
 
 /* ===== API ===== */
@@ -197,10 +191,10 @@ async function callDeepL(text,src="JA",tgt="KO"){
   return withTimeout(fetcher,45000,"DeepL");
 }
 
-/* ===== 분할 유틸 (긴 줄 보호) ===== */
+/* ===== 분할 유틸 (긴 줄 보호: 우선 줄 단위) ===== */
 function splitForTranslate(text, maxLen = 3000){
   const parts=[]; let buf="";
-  const segs=String(text).split(/(?<=[\r\n]+)/); // 우선 줄 단위
+  const segs=String(text).split(/(?<=[\r\n]+)/); // 줄 단위 우선
   for(const s of segs){
     if((buf+s).length>maxLen){
       if(buf) parts.push(buf);
@@ -214,24 +208,31 @@ function splitForTranslate(text, maxLen = 3000){
   return parts;
 }
 
-/* ===== 줄 단위 번역(첫 기호 보존 적용) ===== */
+/* ===== 줄 단위 번역 (요청: 첫 기호 1개 보존 / 출력: 원 꼬리 유지) ===== */
 async function translateSmart(text, src="JA", tgt="KO"){
   const cleaned = preprocessTextForDeepL(text);
   const chunks  = splitForTranslate(cleaned, 3000);
   const out=[];
   for(const [i,chunk] of chunks.entries()){
-    // 각 청크를 다시 줄 단위로 쪼개 처리(빈 줄 유지)
     const lines = String(chunk).split(/\r?\n/);
     const lineOut=[];
     for(const line of lines){
       if(!line.trim()){ lineOut.push(""); continue; }
-      const ready = normalizeTailKeepFirstSymbol(line);
+
+      // ★ 꼬리 분리 → 요청용 첫 기호만 선택
+      const { core, tail } = splitCoreAndTail(line);
+      const firstSym = (tail.match(SYMBOL_RE) || [""])[0];
+      const ready    = core + firstSym; // DeepL로 보낼 텍스트
+
       let resText = ready;
       try{
         const r = await callDeepL(ready, src, tgt);
         resText = r.translation || r.result || r.data || ready;
       }catch{}
-      lineOut.push(resText);
+
+      // ★ 출력에는 원 꼬리(tail)를 그대로 덧붙임
+      lineOut.push(resText + tail);
+
       await new Promise(r=>setTimeout(r,220));
     }
     out.push(lineOut.join("\n"));
@@ -321,7 +322,7 @@ const APP=(function(){ if(!window.__APP__) window.__APP__={lastTokens:null,rubyO
 function buildRubyTokens(tokens){
   return (tokens||[]).map((t,idx)=>{
     const s=String(t.surface||"");
-    const r=String(t.reading||"");
+       const r=String(t.reading||"");
     const lemma=String(t.lemma||s);
     const rt=r?kata2hira(r):"";
     const inner=(hasKanji(s)&&rt)
