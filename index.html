@@ -259,37 +259,35 @@ function splitForTranslate(text, maxLen = 3000){
   return parts;
 }
 
-/* ===== 번역(줄 단위): 요청에만 꼬리 정리 ===== */
+/* ===== 번역(청크 단위) + 꼬리자르기 ===== */
 async function translateSmart(text, src="JA", tgt="KO"){
-  // 1) 느낌표/물음표 이모지 → !/? 정규화
   const normalized = normalizePunctEmojis(text);
-  // 2) 일반 전처리(반복 축약, 이모지 제거 등)
   const cleaned    = preprocessTextForDeepL(normalized);
-  // 3) 길이 분할(줄 우선)
   const chunks     = splitForTranslate(cleaned, 3000);
 
-  const out=[];
-  for(const [i,chunk] of chunks.entries()){
+  const out = [];
+  for (const [i,chunk] of chunks.entries()){
     const lines = String(chunk).split(/\r?\n/);
-    const lineOut=[];
-    for(const line of lines){
-      if(!line.trim()){ lineOut.push(""); continue; }
 
+    // 각 줄은 '꼬리 정리'만 적용해서 준비
+    const readyLines = lines.map(line=>{
+      if(!line.trim()) return "";
       const { core, tail } = splitCoreAndTail(line);
-      const reqTail = makeRequestTail(tail);   // ★ 규칙 적용
-      const ready   = core + reqTail;
+      const reqTail = makeRequestTail(tail);   // 규칙: … 1개, dot/중점 최대3, !/? 각1
+      return core + reqTail;
+    });
 
-      let resText = ready;
-      try{
-        const r = await callDeepL(ready, src, tgt);
-        resText = r.translation || r.result || r.data || ready;
-      }catch{}
-      lineOut.push(resText);
+    const readyText = readyLines.join("\n");
 
-      await new Promise(r=>setTimeout(r,200));
+    try{
+      const r = await callDeepL(readyText, src, tgt);
+      out.push(r.translation || r.result || r.data || readyText);
+    }catch(e){
+      out.push(readyText); // 실패 시 원문(정리본) 그대로
     }
-    out.push(lineOut.join("\n"));
-    await new Promise(r=>setTimeout(r, 50 + i*20));
+
+    // 딜레이는 최소화(필요 없으면 0으로 해도 됨)
+    await new Promise(r=>setTimeout(r, 40 + i*10));
   }
   return out.join("");
 }
