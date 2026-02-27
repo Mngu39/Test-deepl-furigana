@@ -252,7 +252,7 @@ async function callFurigana(text){
   return withTimeout(fetcher,45000,"Furigana");
 }
 async function callDeepL(text,src="JA",tgt="KO"){
-  const body={text,sourceLang:src,targetLang:tgt};
+  const body={text, target:tgt};
   const fetcher=signal=>fetch(DEEPL_URL,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body),signal})
     .then(r=>{if(!r.ok) throw new Error("DeepL "+r.status); return r.json();});
   return withTimeout(fetcher,45000,"DeepL");
