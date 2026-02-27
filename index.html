@@ -9,8 +9,8 @@
   :root{
     --bg:#0b0f14; --card:#11161f; --ink:#e6edf3; --line:#223044; --muted:#9fb0c2; --accent:#5aa9ff;
     /* 초록 테마 */
-    --anki-bg:#112019; --anki-border:#1f3b2d; --anki-ink:#cfe0f2;      /* 아는(옅은) */
-    --learn-bg:#0f7d59; --learn-border:#1cc98a; --learn-ink:#ffffff;  /* 모르는(선명) */
+    --anki-bg:#151a22;   --anki-border:#2a3240; --anki-ink:#e6edf3;  /* DB 존재: 어두운 회색 */
+    --learn-bg:#102744;  --learn-border:#2a5d9a; --learn-ink:#e6edf3; /* DB 부존재: 어두운 파란색 */
     /* 일본어 전용 폰트(신자체) */
     --ja-font:"Hiragino Sans","Hiragino Kaku Gothic ProN","Yu Gothic","YuGothic","Meiryo","Noto Sans JP","Source Han Sans JP","Noto Sans CJK JP",system-ui,-apple-system,sans-serif;
   }
@@ -81,7 +81,8 @@
   .kbox.open .kdesc{display:block}
 
   /* kdesc 메타(목차/순번) */
-  .kdesc.kmeta{display:flex;align-items:center;gap:10px;white-space:nowrap}
+  .kdesc.kmeta{align-items:center;gap:10px;white-space:nowrap}
+  .kbox.open .kdesc.kmeta{display:flex} /* 열렸을 때만 한 줄 메타 표시 */
   .kdesc.kmeta .kmetaTheme{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis}
   .kdesc.kmeta .kmetaUnit{flex:0 0 auto;font-size:11px;line-height:1;padding:2px 8px;border-radius:999px;border:1px solid rgba(255,255,255,.18);color:rgba(255,255,255,.75)}
 
@@ -154,6 +155,27 @@ function htmlToPlainWithBreaks(html){
   return (tmp.textContent||tmp.innerText||"").replace(/\r\n/g,"\n").replace(/\n{3,}/g,"\n\n").trim();
 }
 function stripHtml(s){ const tmp=document.createElement("div"); tmp.innerHTML=String(s||""); return (tmp.textContent||tmp.innerText||"").trim(); }
+function normStr(v){
+  if(v==null) return "";
+  if(Array.isArray(v)) return v.map(x=>String(x||"").trim()).filter(Boolean).join(", ");
+  if(typeof v==="object") return ""; // 객체면 일단 스킵
+  return String(v).trim();
+}
+function pickAny(obj, keys){
+  if(!obj) return "";
+  for(const k of keys){
+    const s = normStr(obj[k]);
+    if(s) return s;
+  }
+  return "";
+}
+function splitHunEumFromOneLine(s){
+  s = String(s||"").replace(/\s+/g," ").trim();
+  if(!s) return {hun:"",eum:""};
+  const parts = s.split(" ");
+  if(parts.length>=2) return { hun: parts.slice(0,-1).join(" "), eum: parts[parts.length-1] };
+  return { hun:"", eum:s };
+}
 function withTimeout(run,ms=45000,label="요청"){
   const ctrl=new AbortController(), t=setTimeout(()=>ctrl.abort(),ms);
   return Promise.race([run(ctrl.signal),(async()=>{await new Promise(r=>setTimeout(r,ms+50));throw new Error(label+" 타임아웃("+ms+"ms)");})()]).finally(()=>clearTimeout(t));
@@ -562,7 +584,18 @@ async function fillKanjiBoxes(lemma){
       created++; continue;
     }
 
-    const hun=(kRec&&kRec["훈"])||"", eum=(kRec&&kRec["음"])||"";
+    let hun = pickAny(kRec, ["훈","훈독","훈음","kun","kunyomi","hun","h"]);
+    let eum = pickAny(kRec, ["음","음독","on","onyomi","eum","e"]);
+
+    // 파일에 따라 한 줄로 합쳐진 필드가 있을 수 있음(안전장치)
+    if(!hun || !eum){
+      const one = pickAny(kRec, ["kr","ko","reading","r","훈음"]);
+      if(one){
+        const se = splitHunEumFromOneLine(one);
+        if(!hun) hun = se.hun;
+        if(!eum) eum = se.eum;
+      }
+    }
     let kr=""; if(hun) kr+=hun; if(hun&&eum) kr+=SEP_WIDE; if(eum) kr+=eum;
     const href="https://hanja.dict.naver.com/#/search?query="+encodeURIComponent(ch);
     popKanji.appendChild(makeKanjiBox({ch, kr, cls:"learn", dictHref:href}));
