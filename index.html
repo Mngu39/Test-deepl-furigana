@@ -8,9 +8,9 @@
 <style>
   :root{
     --bg:#0b0f14; --card:#11161f; --ink:#e6edf3; --line:#223044; --muted:#9fb0c2; --accent:#5aa9ff;
-    /* 초록 테마 */
-    --anki-bg:#151a22; --anki-border:#2a3240; --anki-ink:#e6edf3;      /* 아는(어두운 회색) */
-    --learn-bg:#102744; --learn-border:#2a5d9a; --learn-ink:#e6edf3;  /* 모르는(어두운 파랑) */  /* 모르는(선명) */
+    /* 한자상자 테마(요청 반영) */
+    --anki-bg:#151a22; --anki-border:#2a3240; --anki-ink:#e6edf3;      /* DB 존재: 어두운 회색 */
+    --learn-bg:#102744; --learn-border:#2a5d9a; --learn-ink:#e6edf3; /* DB 부존재: 어두운 파란색 */
     /* 일본어 전용 폰트(신자체) */
     --ja-font:"Hiragino Sans","Hiragino Kaku Gothic ProN","Yu Gothic","YuGothic","Meiryo","Noto Sans JP","Source Han Sans JP","Noto Sans CJK JP",system-ui,-apple-system,sans-serif;
   }
@@ -54,7 +54,7 @@
 
   /* 팝업 */
   #pop{
-    position:fixed; z-index:9999;
+    position:absolute; z-index:9999;
     max-width:min(92vw,520px);
     max-height:80vh;
     overflow:auto; -webkit-overflow-scrolling:touch;
@@ -79,10 +79,12 @@
   .khead.link{cursor:pointer;text-decoration:none;color:inherit}
   .kdesc{display:none;margin-top:6px;font-size:13px;line-height:1.5;white-space:pre-wrap;border-top:1px dashed rgba(255,255,255,.12); padding-top:6px}
   .kbox.open .kdesc{display:block}
+  .kbox.open .kdesc.kmeta{display:flex}
 
   /* kdesc 메타(목차/순번) */
-  .kdesc.kmeta{margin-top:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .kdesc.kmeta .kmetaUnit{display:inline-block;margin-left:8px;font-size:11px;line-height:1;padding:2px 8px;border-radius:999px;border:1px solid rgba(255,255,255,.18);color:rgba(255,255,255,.75);vertical-align:middle}
+  .kdesc.kmeta{align-items:center;gap:10px;white-space:nowrap}
+  .kdesc.kmeta .kmetaTheme{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis}
+  .kdesc.kmeta .kmetaUnit{flex:0 0 auto;font-size:11px;line-height:1;padding:2px 8px;border-radius:999px;border:1px solid rgba(255,255,255,.18);color:rgba(255,255,255,.75)}
 
 </style>
 </head>
@@ -136,7 +138,7 @@ const DEEPL_URL    = "https://solitary-mud-8caf.rlaalsrbr.workers.dev/translate"
 
 /* ===== 로컬 파일(캐시 버스터) ===== */
 const CROWDANKI_URL = "./deck.json?v=20260227";
-const KANJI_DB_URL  = "./kanji_ko_attr_irreg.min.json?v=20260227";
+const KANJI_DB_URL  = "./kanji_ko_attr_irreg.min.json?v=20251005";
 
 /* ===== 유틸 ===== */
 const $ = s=>document.querySelector(s);
@@ -158,6 +160,27 @@ function withTimeout(run,ms=45000,label="요청"){
   return Promise.race([run(ctrl.signal),(async()=>{await new Promise(r=>setTimeout(r,ms+50));throw new Error(label+" 타임아웃("+ms+"ms)");})()]).finally(()=>clearTimeout(t));
 }
 const SEP_WIDE=" ";
+
+function mergeHunEum(rec){
+  if(!rec) return "";
+  // 이미 병합된 값이 있으면 우선 사용
+  const merged = rec["훈음"] || rec["훈음_merged"] || "";
+  if(merged && String(merged).trim()) return String(merged).trim();
+  const hun = (rec["훈"]||"").trim();
+  const eum = (rec["음"]||"").trim();
+  if(hun && eum) return hun + SEP_WIDE + eum;
+  return (hun || eum).trim();
+}
+function normalizeKanjiDb(db){
+  if(!db) return db;
+  for(const k in db){
+    const rec = db[k];
+    if(rec && typeof rec==="object"){
+      rec["훈음"] = mergeHunEum(rec);
+    }
+  }
+  return db;
+}
 
 /* ===== DeepL 전처리: 반복 축약 + 이모지 제거(유지) ===== */
 const EMOJI_RE = /[\u{1F1E6}-\u{1F1FF}\u{1F300}-\u{1F5FF}\u{1F600}-\u{1F64F}\u{1F680}-\u{1F6FF}\u{1F700}-\u{1F77F}\u{1F780}-\u{1F7FF}\u{1F800}-\u{1F8FF}\u{1F900}-\u{1F9FF}\u{1FA00}-\u{1FAFF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu;
@@ -320,7 +343,6 @@ function buildDbFromCrowdAnki(deck){
     const flds=(m.flds||m["flds"]||[]).map(o=>o&&(o.name||o["name"]||""));
     if(uuid&&flds.length) modelMap.set(uuid,flds);
   }
-
   const db={}; const notes=[];
   (function walk(x){
     if(!x) return;
@@ -331,100 +353,93 @@ function buildDbFromCrowdAnki(deck){
     }
   })(deck);
 
-  const strip = (s)=>stripHtml(s);
-  const norm  = (s)=>strip(s).replace(/\s+/g," ").trim();
+  function splitHunEum(backText){
+    const s=stripHtml(backText); if(!s) return {hun:"",eum:""};
+    const parts=s.split(/\s+/);
+    if(parts.length>=2){ const eum=parts[parts.length-1]; const hun=parts.slice(0,-1).join(" "); return {hun,eum}; }
+    if(parts.length===1){ return {hun:"",eum:parts[0]}; }
+    return {hun:"",eum:""};
+  }
 
-  function merge(oldVal, newVal){
-    const a=(oldVal?String(oldVal).split(","):[]).map(s=>s.trim()).filter(Boolean);
-    const b=(newVal?String(newVal).split(","):[]).map(s=>s.trim()).filter(Boolean);
-    for(const x of b) if(x && !a.includes(x)) a.push(x);
-    return a.join(", ");
-  }
-  function setIfEmpty(oldVal,newVal){
-    const o=String(oldVal||"").trim(), n=String(newVal||"").trim();
-    return o?o:n;
-  }
-  function splitHunEumFromOneLine(meaningLine){
-    const s=norm(meaningLine);
-    if(!s) return {hun:"",eum:"",huneum:""};
-    const toks=s.split(" ").filter(Boolean);
-    if(toks.length>=2){
-      const eum=toks[toks.length-1];
-      const hun=toks.slice(0,-1).join(" ");
-      return {hun,eum,huneum:s};
+  function parseMeaningHunEum(meaningText){
+    const raw=stripHtml(meaningText||"");
+    if(!raw) return {hun:"",eum:""};
+    let s = raw.replace(/\s+/g," ").trim();
+    // ①②… 같은 번호 및 구분자 처리
+    s = s.replace(/[①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳]/g,"|");
+    s = s.replace(/[·•]/g,"|");
+    s = s.replace(/\s*\|\s*/g,"|");
+    const parts = s.split("|").map(p=>p.trim()).filter(Boolean);
+
+    const hunArr=[]; const eumArr=[];
+    for(const p of parts){
+      const toks=p.split(/\s+/).filter(Boolean);
+      if(toks.length>=2){
+        const eum=toks[toks.length-1];
+        const hun=toks.slice(0,-1).join(" ");
+        if(hun && !hunArr.includes(hun)) hunArr.push(hun);
+        if(eum && !eumArr.includes(eum)) eumArr.push(eum);
+      }else if(toks.length===1){
+        const lone=toks[0];
+        if(lone && !hunArr.includes(lone)) hunArr.push(lone);
+      }
     }
-    // 한 덩어리면 훈음으로만 둠
-    return {hun:s,eum:"",huneum:s};
+    return {hun:hunArr.join(", "), eum:eumArr.join(", ")};
   }
 
   for(const note of notes){
     const uuid=note["note_model_uuid"];
     const names=modelMap.get(uuid)||[];
     const vals=note["fields"]||note["flds"]||[];
+    const iFront=names.findIndex(n=>/^front$/i.test(n));
+    const iBack =names.findIndex(n=>/^back$/i.test(n));
+    const iExpl =names.findIndex(n=>/^explain$/i.test(n));
 
-    // 新: Unit / Expression / Meaning / Kanji Theme
     const iUnit =names.findIndex(n=>/^unit$/i.test(n));
     const iExpr =names.findIndex(n=>/^expression$/i.test(n));
     const iMean =names.findIndex(n=>/^meaning$/i.test(n));
     const iTheme=names.findIndex(n=>/^kanji\s*theme$/i.test(n));
 
-    // 舊: Front / Back / Explain
-    const iFront=names.findIndex(n=>/^front$/i.test(n));
-    const iBack =names.findIndex(n=>/^back$/i.test(n));
-    const iExpl =names.findIndex(n=>/^explain$/i.test(n));
-
-    let kanji="", hun="", eum="", huneum="", unit="", theme="", memoText="";
+    let kanji="", hun="", eum="", unit="", theme="", memoText="";
 
     if(iExpr>=0 && iMean>=0){
-      kanji = norm(vals[iExpr]||"");
-      unit  = norm(iUnit>=0?vals[iUnit]:"");
-      theme = norm(iTheme>=0?vals[iTheme]:"");
-      ({hun,eum,huneum} = splitHunEumFromOneLine(vals[iMean]||""));
-      // huneum이 비어있으면 hun/eum으로 조합
-      if(!huneum){
-        huneum = (hun + ((hun&&eum)?" ":"") + eum).trim();
-      }
+      // 日本語::常用漢字 (Unit/Expression/Meaning/Kanji Theme)
+      kanji = stripHtml(vals[iExpr]||"");
+      unit  = stripHtml(iUnit>=0?vals[iUnit]:"");
+      theme = stripHtml(iTheme>=0?vals[iTheme]:"");
+      const meaning = vals[iMean]||"";
+      ({hun,eum} = parseMeaningHunEum(meaning));
     }else{
-      kanji = norm(iFront>=0?vals[iFront]:"");
-      const back = norm(iBack>=0?vals[iBack]:"");
-      const toks=back.split(" ").filter(Boolean);
-      if(toks.length>=2){
-        eum=toks[toks.length-1];
-        hun=toks.slice(0,-1).join(" ");
-      }else if(toks.length===1){
-        eum=toks[0];
-        hun="";
-      }
-      huneum = (hun + ((hun&&eum)?" ":"") + eum).trim();
-      memoText = htmlToPlainWithBreaks(iExpl>=0?vals[iExpl]:"");
+      // 기존(Front/Back/Explain)
+      kanji = stripHtml(iFront>=0?vals[iFront]:"");
+      const back = iBack>=0 ? vals[iBack] : "";
+      const memo = iExpl>=0 ? vals[iExpl] : "";
+      ({hun,eum} = splitHunEum(back));
+      memoText = htmlToPlainWithBreaks(memo);
     }
 
     if(!kanji) continue;
-
     for(const ch of Array.from(kanji)){
       if(!/[\u4E00-\u9FFF]/.test(ch)) continue;
-      const rec=db[ch]||{"훈":"","음":"","훈음":"","설명":"","순번":"","목차":""};
-
-      if(hun)    rec["훈"]   = merge(rec["훈"], hun);
-      if(eum)    rec["음"]   = merge(rec["음"], eum);
-      if(huneum) rec["훈음"] = setIfEmpty(rec["훈음"], huneum);
-      if(theme)  rec["목차"] = setIfEmpty(rec["목차"], theme);
-      if(unit)   rec["순번"] = setIfEmpty(rec["순번"], unit);
-
-      if(memoText && memoText.length > (rec["설명"]||"").length) rec["설명"]=memoText;
-
-      // 혹시 훈음이 없으면 최종 조합
-      if(!rec["훈음"]){
-        rec["훈음"] = (rec["훈"] + ((rec["훈"]&&rec["음"])?" ":"") + rec["음"]).trim();
+      const rec=db[ch]||{"훈":"", "음":"", "훈음":"", "설명":"", "순번":"", "목차":""};
+      function merge(oldVal,newVal){
+        const arr=(oldVal?oldVal.split(","):[]).map(s=>s.trim()).filter(Boolean);
+        for(const t of (newVal?newVal.split(","):[])){ const s=t.trim(); if(s&&!arr.includes(s)) arr.push(s); }
+        return arr.join(", ");
       }
-
+      if(hun) rec["훈"]=merge(rec["훈"],hun);
+      if(eum) rec["음"]=merge(rec["음"],eum);
+      if(unit) rec["순번"]=unit;
+      if(theme) rec["목차"]=theme;
+      if(memoText && memoText.length>(rec["설명"]||"").length) rec["설명"]=memoText;
+      rec["훈음"]=mergeHunEum(rec);
       db[ch]=rec;
     }
   }
   return db;
 }
 async function ensureDbs(){
-  if(!KANJI_DB) KANJI_DB=await loadJsonGraceful(KANJI_DB_URL);
+  if(!KANJI_DB) KANJI_DB=normalizeKanjiDb(await loadJsonGraceful(KANJI_DB_URL));
   if(ANKI_DB===null){
     const deck=await loadJsonGraceful(CROWDANKI_URL);
     ANKI_DB=deck?buildDbFromCrowdAnki(deck):null;
@@ -475,6 +490,9 @@ function getLemmaReading(lemma){
 /* ===== 팝업 위치 ===== */
 function positionPopupToToken(tokEl){
   const pad = 8;
+  // anchor 저장(스크롤/리사이즈 시 재배치)
+  APP.popAnchor = tokEl;
+
   pop.style.visibility = "hidden";
   pop.style.display = "block";
 
@@ -482,19 +500,21 @@ function positionPopupToToken(tokEl){
   const rect  = pop.getBoundingClientRect();
   const vw = window.innerWidth, vh = window.innerHeight;
 
-  let left = prect.left;
-  let top  = prect.bottom + 6;
+  // absolute 포지션: 문서 좌표로 변환
+  let left = prect.left + window.scrollX;
+  let top  = prect.bottom + window.scrollY + 6;
 
-  if (left + rect.width + pad > vw) left = Math.max(vw - rect.width - pad, pad);
-  if (left < pad) left = pad;
+  // 좌우 clamp(초기/확장 동일)
+  const maxLeft = window.scrollX + vw - rect.width - pad;
+  const minLeft = window.scrollX + pad;
+  if (left > maxLeft) left = Math.max(maxLeft, minLeft);
+  if (left < minLeft) left = minLeft;
 
-  if (top + rect.height + pad > vh){
-    const tryTop = prect.top - rect.height - 6;
-    top = (tryTop >= pad) ? tryTop : Math.max(vh - rect.height - pad, pad);
-  }
-
-  if (vw < 360){
-    left = Math.max((vw - rect.width)/2, pad);
+  // 아래 공간 부족하면 위로
+  const maxTop = window.scrollY + vh - rect.height - pad;
+  if (top > maxTop){
+    const tryTop = prect.top + window.scrollY - rect.height - 6;
+    top = (tryTop >= window.scrollY + pad) ? tryTop : Math.max(maxTop, window.scrollY + pad);
   }
 
   pop.style.left = `${left}px`;
@@ -502,50 +522,12 @@ function positionPopupToToken(tokEl){
   pop.style.visibility = "visible";
 }
 
-function repositionPop(){
-  if(pop.style.display==="block" && APP.popAnchor) positionPopupToToken(APP.popAnchor);
-}
-
-
 /* ===== 팝업 구성 ===== */
 const pop=$("#pop"), popLink=$("#popLink"), popSub=$("#popSub"), popDeepl=$("#popDeepl");
 const popKanji=$("#popKanji"), popMsg=$("#popMsg");
 function buildNaverSearchUrl(q){ return "https://ja.dict.naver.com/#/search?query="+encodeURIComponent(q||""); }
 
-function makeKanjiBox({ch, kr, cls, dictHref="", metaTheme="", metaUnit=""}){
-  const box=document.createElement("div");
-  box.className=`kbox ${cls}`;
-
-  let head;
-  if (cls==="learn" && dictHref){
-    head=document.createElement("a");
-    head.className="khead link";
-    head.href=dictHref; head.target="_blank"; head.rel="noopener";
-  }else{
-    head=document.createElement("div");
-    head.className="khead toggle";
-  }
-
-  // 한자만 일본어 폰트로, 훈음은 그대로
-  head.innerHTML = `<span class="ja" lang="ja">${escapeHtml(ch)}</span> · ${escapeHtml(kr||"")}`;
-  box.appendChild(head);
-
-  // anki: 목차 + 순번(설명 대체)
-  if (cls==="anki" && (metaTheme || metaUnit)){
-    const desc=document.createElement("div");
-    desc.className="kdesc ja kmeta";
-    const theme = escapeHtml(metaTheme||"");
-    const unit  = escapeHtml(metaUnit||"");
-    desc.innerHTML = `${theme || "&nbsp;"}` + (unit ? `<span class="kmetaUnit">#${unit}</span>` : "");
-    box.appendChild(desc);
-
-    head.addEventListener("click", ()=>{
-      box.classList.toggle("open");
-      repositionPop();
-    });
-  }
-  return box;
-}){
+function makeKanjiBox({ch, kr, cls, descText="", dictHref="", metaTheme="", metaUnit=""}){
   const box=document.createElement("div");
   box.className=`kbox ${cls}`;
 
@@ -563,13 +545,20 @@ function makeKanjiBox({ch, kr, cls, dictHref="", metaTheme="", metaUnit=""}){
   head.innerHTML = `<span class="ja" lang="ja">${escapeHtml(ch)}</span> · ${escapeHtml(kr||"")}`;
   box.appendChild(head);
 
-  if (cls==="anki" && descText){
+  if (cls==="anki" && (metaTheme || metaUnit || descText)){
     const desc=document.createElement("div");
-    // 설명에도 일본어가 섞일 수 있으므로 ja 지정
-    desc.className="kdesc ja";
-    desc.textContent = htmlToPlainWithBreaks(descText);
+    // 목차/순번(=설명 대체)도 일본어가 섞일 수 있으므로 ja 지정
+    desc.className = (metaTheme || metaUnit) ? "kdesc ja kmeta" : "kdesc ja";
+    if (metaTheme || metaUnit){
+      const theme = metaTheme ? escapeHtml(metaTheme) : "";
+      const unit  = metaUnit  ? escapeHtml(metaUnit)  : "";
+      desc.innerHTML = `<span class="kmetaTheme">${theme||"&nbsp;"}</span>` +
+                       (unit ? `<span class="kmetaUnit">#${unit}</span>` : "");
+    }else{
+      desc.textContent = htmlToPlainWithBreaks(descText);
+    }
     box.appendChild(desc);
-    head.addEventListener("click", ()=>{ box.classList.toggle("open"); });
+    head.addEventListener("click", ()=>{ box.classList.toggle("open"); requestAnimationFrame(()=>{ if(APP.popAnchor) positionPopupToToken(APP.popAnchor); }); });
   }
   return box;
 }
@@ -586,29 +575,21 @@ async function fillKanjiBoxes(lemma){
     if(/[\u4E00-\u9FFF]/.test(ch) && !uniq.includes(ch)) uniq.push(ch);
   }
 
-  function krFrom(rec){
-    if(!rec) return "";
-    const he = String(rec["훈음"]||"").trim();
-    if(he) return he;
-    const hun=String(rec["훈"]||"").trim();
-    const eum=String(rec["음"]||"").trim();
-    return (hun + ((hun&&eum) ? SEP_WIDE : "") + eum).trim();
-  }
-
   let created=0;
   for(const ch of uniq){
     const aRec = dbA && dbA[ch];
     const kRec = dbK && dbK[ch];
 
     if (aRec){
-      const kr = krFrom(aRec);
+      const kr = mergeHunEum(aRec);
       const metaTheme = aRec["목차"] || "";
       const metaUnit  = aRec["순번"] || "";
-      popKanji.appendChild(makeKanjiBox({ch, kr, cls:"anki", metaTheme, metaUnit}));
+      const desc = aRec["설명"] ? htmlToPlainWithBreaks(aRec["설명"]) : "";
+      popKanji.appendChild(makeKanjiBox({ch, kr, cls:"anki", descText:desc, metaTheme, metaUnit}));
       created++; continue;
     }
 
-    const kr = krFrom(kRec);
+    const kr = mergeHunEum(kRec);
     const href="https://hanja.dict.naver.com/#/search?query="+encodeURIComponent(ch);
     popKanji.appendChild(makeKanjiBox({ch, kr, cls:"learn", dictHref:href}));
     created++;
@@ -629,7 +610,6 @@ async function fillKanjiBoxes(lemma){
 /* ===== 팝업 오픈/닫기 ===== */
 function openPopBelowToken(tokEl, payload){
   const surface=payload.surface||"", lemma=payload.lemma||surface;
-  APP.popAnchor = tokEl;
 
   popLink.innerHTML=escapeHtml(lemma);
   popLink.href=buildNaverSearchUrl(lemma);
@@ -638,7 +618,6 @@ function openPopBelowToken(tokEl, payload){
   if(hasKanji(lemma)){
     getLemmaReading(lemma).then(rt=>{
       popLink.innerHTML = rt ? `<ruby class="ja" lang="ja"><rb>${escapeHtml(lemma)}</rb><rt>${escapeHtml(rt)}</rt></ruby>` : escapeHtml(lemma);
-      repositionPop();
     });
   }
 
@@ -646,13 +625,12 @@ function openPopBelowToken(tokEl, payload){
   callDeepL(preprocessTextForDeepL(normalizePunctEmojis(lemma)),"JA","KO").then(res=>{
     const t=res.translation||res.result||res.data||"";
     popDeepl.textContent=t||"(결과 없음)";
-    repositionPop();
   }).catch(e=>{ popDeepl.textContent="에러: "+(e&&e.message?e.message:String(e)); });
 
-  fillKanjiBoxes(lemma).then(repositionPop);
+  fillKanjiBoxes(lemma);
   positionPopupToToken(tokEl);
 }
-function closePop(){ pop.style.display="none"; APP.popAnchor=null; }
+function closePop(){ pop.style.display="none"; }
 
 /* ===== 실행 ===== */
 async function runBoth(){
@@ -692,10 +670,15 @@ async function runBoth(){
   });
   $("#popClose").addEventListener("click",closePop);
   window.addEventListener("keydown",(e)=>{ if((e.ctrlKey||e.metaKey)&&e.key==="Enter"){ e.preventDefault(); runBoth(); } });
-
-  // 팝업이 토큰에 "딸려서" 움직이도록: 스크롤 시 재배치
-  window.addEventListener("scroll", ()=>{ repositionPop(); }, {passive:true});
-  $("#rubyOut").addEventListener("scroll", ()=>{ repositionPop(); }, {passive:true});
+  // 팝업이 스크롤에 "딸려오도록" (window + 원문 패널)
+  const reflowPop = ()=>{
+    if(pop.style.display==="block" && APP.popAnchor){
+      positionPopupToToken(APP.popAnchor);
+    }
+  };
+  window.addEventListener("scroll", reflowPop, { passive:true });
+  window.addEventListener("resize", reflowPop);
+  $("#rubyOut").addEventListener("scroll", reflowPop, { passive:true });
   $("#inputBox").addEventListener("toggle",()=>{ if($("#inputBox").open) $("#input").focus(); });
 })();
 
