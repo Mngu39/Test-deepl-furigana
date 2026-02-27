@@ -10,7 +10,7 @@
     --bg:#0b0f14; --card:#11161f; --ink:#e6edf3; --line:#223044; --muted:#9fb0c2; --accent:#5aa9ff;
     /* 초록 테마 */
     --anki-bg:#151a22;   --anki-border:#2a3240; --anki-ink:#e6edf3;  /* DB 존재: 어두운 회색 */
-    --learn-bg:#102744;  --learn-border:#2a5d9a; --learn-ink:#e6edf3; /* DB 부존재: 어두운 파란색 */
+    --learn-bg:#102744;  --learn-border:#2a5d9a; --learn-ink:#e6edf3; /* DB 부존재: 어두운 파랑 */
     /* 일본어 전용 폰트(신자체) */
     --ja-font:"Hiragino Sans","Hiragino Kaku Gothic ProN","Yu Gothic","YuGothic","Meiryo","Noto Sans JP","Source Han Sans JP","Noto Sans CJK JP",system-ui,-apple-system,sans-serif;
   }
@@ -54,10 +54,11 @@
 
   /* 팝업 */
   #pop{
-    position:fixed; z-index:9999;
+    position:absolute; z-index:9999;
     max-width:min(92vw,520px);
     max-height:80vh;
-    overflow:auto; -webkit-overflow-scrolling:touch;
+    overflow:auto;
+    overflow-x:hidden; -webkit-overflow-scrolling:touch;
     background:var(--card); border:1px solid var(--line);
     border-radius:14px; padding:14px; display:none;
   }
@@ -138,7 +139,7 @@ const DEEPL_URL    = "https://solitary-mud-8caf.rlaalsrbr.workers.dev/translate"
 
 /* ===== 로컬 파일(캐시 버스터) ===== */
 const CROWDANKI_URL = "./deck.json?v=20260227";
-const KANJI_DB_URL  = "./kanji_ko_attr_irreg.min.json?v=20251005";
+const KANJI_DB_URL  = "./kanji_ko_attr_irreg.min.json?v=20260227";
 
 /* ===== 유틸 ===== */
 const $ = s=>document.querySelector(s);
@@ -155,27 +156,6 @@ function htmlToPlainWithBreaks(html){
   return (tmp.textContent||tmp.innerText||"").replace(/\r\n/g,"\n").replace(/\n{3,}/g,"\n\n").trim();
 }
 function stripHtml(s){ const tmp=document.createElement("div"); tmp.innerHTML=String(s||""); return (tmp.textContent||tmp.innerText||"").trim(); }
-function normStr(v){
-  if(v==null) return "";
-  if(Array.isArray(v)) return v.map(x=>String(x||"").trim()).filter(Boolean).join(", ");
-  if(typeof v==="object") return ""; // 객체면 일단 스킵
-  return String(v).trim();
-}
-function pickAny(obj, keys){
-  if(!obj) return "";
-  for(const k of keys){
-    const s = normStr(obj[k]);
-    if(s) return s;
-  }
-  return "";
-}
-function splitHunEumFromOneLine(s){
-  s = String(s||"").replace(/\s+/g," ").trim();
-  if(!s) return {hun:"",eum:""};
-  const parts = s.split(" ");
-  if(parts.length>=2) return { hun: parts.slice(0,-1).join(" "), eum: parts[parts.length-1] };
-  return { hun:"", eum:s };
-}
 function withTimeout(run,ms=45000,label="요청"){
   const ctrl=new AbortController(), t=setTimeout(()=>ctrl.abort(),ms);
   return Promise.race([run(ctrl.signal),(async()=>{await new Promise(r=>setTimeout(r,ms+50));throw new Error(label+" 타임아웃("+ms+"ms)");})()]).finally(()=>clearTimeout(t));
@@ -495,20 +475,24 @@ function positionPopupToToken(tokEl){
   const prect = tokEl.getBoundingClientRect();
   const rect  = pop.getBoundingClientRect();
   const vw = window.innerWidth, vh = window.innerHeight;
+  const sx = window.scrollX || window.pageXOffset || 0;
+  const sy = window.scrollY || window.pageYOffset || 0;
 
-  let left = prect.left;
-  let top  = prect.bottom + 6;
+  // absolute: document 좌표로 배치(스크롤과 함께 움직임)
+  let left = prect.left + sx;
+  let top  = prect.bottom + sy + 6;
 
-  if (left + rect.width + pad > vw) left = Math.max(vw - rect.width - pad, pad);
-  if (left < pad) left = pad;
+  // viewport 기준으로 clamp
+  if ((left - sx) + rect.width + pad > vw) left = Math.max(sx + vw - rect.width - pad, sx + pad);
+  if ((left - sx) < pad) left = sx + pad;
 
-  if (top + rect.height + pad > vh){
-    const tryTop = prect.top - rect.height - 6;
-    top = (tryTop >= pad) ? tryTop : Math.max(vh - rect.height - pad, pad);
+  if ((top - sy) + rect.height + pad > vh){
+    const tryTop = (prect.top + sy) - rect.height - 6;
+    top = (tryTop - sy >= pad) ? tryTop : Math.max(sy + vh - rect.height - pad, sy + pad);
   }
 
   if (vw < 360){
-    left = Math.max((vw - rect.width)/2, pad);
+    left = Math.max(sx + (vw - rect.width)/2, sx + pad);
   }
 
   pop.style.left = `${left}px`;
@@ -552,7 +536,7 @@ function makeKanjiBox({ch, kr, cls, descText="", dictHref="", metaTheme="", meta
       desc.textContent = htmlToPlainWithBreaks(descText);
     }
     box.appendChild(desc);
-    head.addEventListener("click", ()=>{ box.classList.toggle("open"); });
+    head.addEventListener("click", ()=>{ box.classList.toggle("open"); setTimeout(()=>{ if(pop.style.display==="block" && APP.anchorEl) positionPopupToToken(APP.anchorEl); },0); });
   }
   return box;
 }
@@ -584,18 +568,7 @@ async function fillKanjiBoxes(lemma){
       created++; continue;
     }
 
-    let hun = pickAny(kRec, ["훈","훈독","훈음","kun","kunyomi","hun","h"]);
-    let eum = pickAny(kRec, ["음","음독","on","onyomi","eum","e"]);
-
-    // 파일에 따라 한 줄로 합쳐진 필드가 있을 수 있음(안전장치)
-    if(!hun || !eum){
-      const one = pickAny(kRec, ["kr","ko","reading","r","훈음"]);
-      if(one){
-        const se = splitHunEumFromOneLine(one);
-        if(!hun) hun = se.hun;
-        if(!eum) eum = se.eum;
-      }
-    }
+    const hun=(kRec&&kRec["훈"])||"", eum=(kRec&&kRec["음"])||"";
     let kr=""; if(hun) kr+=hun; if(hun&&eum) kr+=SEP_WIDE; if(eum) kr+=eum;
     const href="https://hanja.dict.naver.com/#/search?query="+encodeURIComponent(ch);
     popKanji.appendChild(makeKanjiBox({ch, kr, cls:"learn", dictHref:href}));
@@ -616,6 +589,7 @@ async function fillKanjiBoxes(lemma){
 
 /* ===== 팝업 오픈/닫기 ===== */
 function openPopBelowToken(tokEl, payload){
+  APP.anchorEl = tokEl;
   const surface=payload.surface||"", lemma=payload.lemma||surface;
 
   popLink.innerHTML=escapeHtml(lemma);
@@ -637,7 +611,7 @@ function openPopBelowToken(tokEl, payload){
   fillKanjiBoxes(lemma);
   positionPopupToToken(tokEl);
 }
-function closePop(){ pop.style.display="none"; }
+function closePop(){ pop.style.display="none"; APP.anchorEl = null; }
 
 /* ===== 실행 ===== */
 async function runBoth(){
@@ -676,7 +650,18 @@ async function runBoth(){
     }
   });
   $("#popClose").addEventListener("click",closePop);
-  window.addEventListener("keydown",(e)=>{ if((e.ctrlKey||e.metaKey)&&e.key==="Enter"){ e.preventDefault(); runBoth(); } });
+  
+  // 팝업: 화면/패널 스크롤 시 토큰에 맞춰 재배치 (좌우 벗어남 방지 포함)
+  window.addEventListener("scroll", ()=>{
+    if(pop.style.display==="block" && APP.anchorEl) positionPopupToToken(APP.anchorEl);
+  }, {passive:true});
+  window.addEventListener("resize", ()=>{
+    if(pop.style.display==="block" && APP.anchorEl) positionPopupToToken(APP.anchorEl);
+  });
+  $("#rubyOut").addEventListener("scroll", ()=>{
+    if(pop.style.display==="block" && APP.anchorEl) positionPopupToToken(APP.anchorEl);
+  }, {passive:true});
+window.addEventListener("keydown",(e)=>{ if((e.ctrlKey||e.metaKey)&&e.key==="Enter"){ e.preventDefault(); runBoth(); } });
   $("#inputBox").addEventListener("toggle",()=>{ if($("#inputBox").open) $("#input").focus(); });
 })();
 
