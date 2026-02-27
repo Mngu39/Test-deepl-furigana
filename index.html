@@ -79,6 +79,12 @@
   .khead.link{cursor:pointer;text-decoration:none;color:inherit}
   .kdesc{display:none;margin-top:6px;font-size:13px;line-height:1.5;white-space:pre-wrap;border-top:1px dashed rgba(255,255,255,.12); padding-top:6px}
   .kbox.open .kdesc{display:block}
+
+  /* kdesc 메타(목차/순번) */
+  .kdesc.kmeta{display:flex;align-items:center;gap:10px;white-space:nowrap}
+  .kdesc.kmeta .kmetaTheme{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis}
+  .kdesc.kmeta .kmetaUnit{flex:0 0 auto;font-size:11px;line-height:1;padding:2px 8px;border-radius:999px;border:1px solid rgba(255,255,255,.18);color:rgba(255,255,255,.75)}
+
 </style>
 </head>
 <body>
@@ -130,7 +136,7 @@ const FURIGANA_URL = "https://furigana-api-345684237835.asia-northeast1.run.app/
 const DEEPL_URL    = "https://solitary-mud-8caf.rlaalsrbr.workers.dev/translate";
 
 /* ===== 로컬 파일(캐시 버스터) ===== */
-const CROWDANKI_URL = "./일본어_한자_암기박사/deck.json?v=20251005";
+const CROWDANKI_URL = "./일본어_한자_암기박사/deck.json?v=20260227";
 const KANJI_DB_URL  = "./kanji_ko_attr_irreg.min.json?v=20251005";
 
 /* ===== 유틸 ===== */
@@ -333,6 +339,32 @@ function buildDbFromCrowdAnki(deck){
     return {hun:"",eum:""};
   }
 
+  function parseMeaningHunEum(meaningText){
+    const raw=stripHtml(meaningText||"");
+    if(!raw) return {hun:"",eum:""};
+    let s = raw.replace(/\s+/g," ").trim();
+    // ①②… 같은 번호 및 구분자 처리
+    s = s.replace(/[①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳]/g,"|");
+    s = s.replace(/[·•]/g,"|");
+    s = s.replace(/\s*\|\s*/g,"|");
+    const parts = s.split("|").map(p=>p.trim()).filter(Boolean);
+
+    const hunArr=[]; const eumArr=[];
+    for(const p of parts){
+      const toks=p.split(/\s+/).filter(Boolean);
+      if(toks.length>=2){
+        const eum=toks[toks.length-1];
+        const hun=toks.slice(0,-1).join(" ");
+        if(hun && !hunArr.includes(hun)) hunArr.push(hun);
+        if(eum && !eumArr.includes(eum)) eumArr.push(eum);
+      }else if(toks.length===1){
+        const lone=toks[0];
+        if(lone && !hunArr.includes(lone)) hunArr.push(lone);
+      }
+    }
+    return {hun:hunArr.join(", "), eum:eumArr.join(", ")};
+  }
+
   for(const note of notes){
     const uuid=note["note_model_uuid"];
     const names=modelMap.get(uuid)||[];
@@ -340,16 +372,34 @@ function buildDbFromCrowdAnki(deck){
     const iFront=names.findIndex(n=>/^front$/i.test(n));
     const iBack =names.findIndex(n=>/^back$/i.test(n));
     const iExpl =names.findIndex(n=>/^explain$/i.test(n));
-    const kanji=stripHtml(iFront>=0?vals[iFront]:"");
-    const back =iBack>=0 ?vals[iBack] :"";
-    const memo =iExpl>=0 ?vals[iExpl] :"";
-    const {hun,eum}=splitHunEum(back);
-    const memoText=htmlToPlainWithBreaks(memo);
+
+    const iUnit =names.findIndex(n=>/^unit$/i.test(n));
+    const iExpr =names.findIndex(n=>/^expression$/i.test(n));
+    const iMean =names.findIndex(n=>/^meaning$/i.test(n));
+    const iTheme=names.findIndex(n=>/^kanji\s*theme$/i.test(n));
+
+    let kanji="", hun="", eum="", unit="", theme="", memoText="";
+
+    if(iExpr>=0 && iMean>=0){
+      // 日本語::常用漢字 (Unit/Expression/Meaning/Kanji Theme)
+      kanji = stripHtml(vals[iExpr]||"");
+      unit  = stripHtml(iUnit>=0?vals[iUnit]:"");
+      theme = stripHtml(iTheme>=0?vals[iTheme]:"");
+      const meaning = vals[iMean]||"";
+      ({hun,eum} = parseMeaningHunEum(meaning));
+    }else{
+      // 기존(Front/Back/Explain)
+      kanji = stripHtml(iFront>=0?vals[iFront]:"");
+      const back = iBack>=0 ? vals[iBack] : "";
+      const memo = iExpl>=0 ? vals[iExpl] : "";
+      ({hun,eum} = splitHunEum(back));
+      memoText = htmlToPlainWithBreaks(memo);
+    }
 
     if(!kanji) continue;
     for(const ch of Array.from(kanji)){
       if(!/[\u4E00-\u9FFF]/.test(ch)) continue;
-      const rec=db[ch]||{"훈":"", "음":"", "설명":""};
+      const rec=db[ch]||{"훈":"", "음":"", "설명":"", "순번":"", "목차":""};
       function merge(oldVal,newVal){
         const arr=(oldVal?oldVal.split(","):[]).map(s=>s.trim()).filter(Boolean);
         for(const t of (newVal?newVal.split(","):[])){ const s=t.trim(); if(s&&!arr.includes(s)) arr.push(s); }
@@ -357,6 +407,8 @@ function buildDbFromCrowdAnki(deck){
       }
       if(hun) rec["훈"]=merge(rec["훈"],hun);
       if(eum) rec["음"]=merge(rec["음"],eum);
+      if(unit) rec["순번"]=unit;
+      if(theme) rec["목차"]=theme;
       if(memoText && memoText.length>(rec["설명"]||"").length) rec["설명"]=memoText;
       db[ch]=rec;
     }
@@ -447,7 +499,7 @@ const pop=$("#pop"), popLink=$("#popLink"), popSub=$("#popSub"), popDeepl=$("#po
 const popKanji=$("#popKanji"), popMsg=$("#popMsg");
 function buildNaverSearchUrl(q){ return "https://ja.dict.naver.com/#/search?query="+encodeURIComponent(q||""); }
 
-function makeKanjiBox({ch, kr, cls, descText="", dictHref=""}){
+function makeKanjiBox({ch, kr, cls, descText="", dictHref="", metaTheme="", metaUnit=""}){
   const box=document.createElement("div");
   box.className=`kbox ${cls}`;
 
@@ -465,11 +517,18 @@ function makeKanjiBox({ch, kr, cls, descText="", dictHref=""}){
   head.innerHTML = `<span class="ja" lang="ja">${escapeHtml(ch)}</span> · ${escapeHtml(kr||"")}`;
   box.appendChild(head);
 
-  if (cls==="anki" && descText){
+  if (cls==="anki" && (metaTheme || metaUnit || descText)){
     const desc=document.createElement("div");
-    // 설명에도 일본어가 섞일 수 있으므로 ja 지정
-    desc.className="kdesc ja";
-    desc.textContent = htmlToPlainWithBreaks(descText);
+    // 목차/순번(=설명 대체)도 일본어가 섞일 수 있으므로 ja 지정
+    desc.className = (metaTheme || metaUnit) ? "kdesc ja kmeta" : "kdesc ja";
+    if (metaTheme || metaUnit){
+      const theme = metaTheme ? escapeHtml(metaTheme) : "";
+      const unit  = metaUnit  ? escapeHtml(metaUnit)  : "";
+      desc.innerHTML = `<span class="kmetaTheme">${theme||"&nbsp;"}</span>` +
+                       (unit ? `<span class="kmetaUnit">#${unit}</span>` : "");
+    }else{
+      desc.textContent = htmlToPlainWithBreaks(descText);
+    }
     box.appendChild(desc);
     head.addEventListener("click", ()=>{ box.classList.toggle("open"); });
   }
@@ -496,8 +555,10 @@ async function fillKanjiBoxes(lemma){
     if (aRec){
       const hun=aRec["훈"]||"", eum=aRec["음"]||"";
       let kr=""; if(hun) kr+=hun; if(hun&&eum) kr+=SEP_WIDE; if(eum) kr+=eum;
+      const metaTheme = aRec["목차"] || "";
+      const metaUnit  = aRec["순번"] || "";
       const desc = aRec["설명"] ? htmlToPlainWithBreaks(aRec["설명"]) : "";
-      popKanji.appendChild(makeKanjiBox({ch, kr, cls:"anki", descText:desc}));
+      popKanji.appendChild(makeKanjiBox({ch, kr, cls:"anki", descText:desc, metaTheme, metaUnit}));
       created++; continue;
     }
 
