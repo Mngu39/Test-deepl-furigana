@@ -85,19 +85,14 @@
   .kbox.open .kdesc.kmeta{display:flex}
   .kdesc.kmeta .kmetaTheme{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis}
   .kdesc.kmeta .kmetaUnit{flex:0 0 auto;font-size:11px;line-height:1;padding:2px 8px;border-radius:999px;border:1px solid rgba(255,255,255,.18);color:rgba(255,255,255,.75)}
+  /* ---- 좌우 스크롤 제거(원문/번역 박스) ---- */
+  .pane{
+    overflow-x: hidden;
+    overflow-y: auto;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
 
-  /* --- PATCH: disable horizontal scroll in source/translation panes --- */
-  #rubyOut, #transOut{
-    overflow-x: hidden !important;
-    overflow-y: auto !important;
-    overflow-wrap: anywhere !important;
-    word-break: break-word !important;
-    white-space: pre-wrap !important;
-  }
-  #rubyOut * , #transOut *{
-    overflow-wrap: anywhere !important;
-    word-break: break-word !important;
-  }
 </style>
 </head>
 <body>
@@ -288,32 +283,38 @@ function splitForTranslate(text, maxLen = 3000){
 
 /* ===== 번역(청크 단위 호출, 줄별 꼬리 정리 후 합쳐서 전송) ===== */
 async function translateSmart(text, src="JA", tgt="KO"){
+  // 원문 줄바꿈(엔터)을 번역 결과에도 그대로 반영:
+  // 줄(개행) 단위로 번역하고 \n으로 다시 합칩니다.
   const normalized = normalizePunctEmojis(text);
   const cleaned    = preprocessTextForDeepL(normalized);
-  const chunks     = splitForTranslate(cleaned, 3000);
 
-  const out = [];
-  for (const [i,chunk] of chunks.entries()){
-    const lines = String(chunk).split(/\r?\n/);
-    const readyLines = lines.map(line=>{
-      if(!line.trim()) return "";
-      const { core, tail } = splitCoreAndTail(line);
-      const reqTail = makeRequestTail(tail);   // … 1개 / dotlike 최대3 / !? 각1
-      return core + reqTail;
-    });
-    const readyText = readyLines.join("\n");
+  const lines = String(cleaned).split(/\r?\n/);
+  const outLines = [];
+
+  for (let i = 0; i < lines.length; i++){
+    const line = lines[i];
+
+    if (!line.trim()){
+      outLines.push("");
+      continue;
+    }
+
+    const { core, tail } = splitCoreAndTail(line);
+    const reqTail = makeRequestTail(tail);
+    const readyText = core + reqTail;
 
     try{
       const r = await callDeepL(readyText, src, tgt);
-      out.push(r.translation || r.result || r.data || readyText);
+      const t = r.translation || r.result || r.data || "";
+      outLines.push(t || readyText);
     }catch(e){
-      out.push(readyText); // 실패 시 원문(정리본)
+      outLines.push(readyText);
     }
 
-    // 필요시 완전히 0으로 줄여도 됨
-    await new Promise(r=>setTimeout(r, 40 + i*10));
+    await new Promise(r=>setTimeout(r, 30));
   }
-  return out.join("");
+
+  return outLines.join("\n");
 }
 
 /* ===== DB 로드 ===== */
